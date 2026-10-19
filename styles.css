@@ -779,3 +779,31 @@ a.info-card:hover{border-color:rgba(255,182,18,.6);transform:translateY(-4px);}
 @media (max-width:640px){
   .chart-facts{grid-template-columns:1fr;}
 }
+
+/* --------------------------------------------------------------------------
+   20. NAV FIT (8 menu items incl. Solar Calculator)
+   -------------------------------------------------------------------------- */
+@media (max-width:1300px) and (min-width:1081px){
+  .nav-links{gap:1.2rem;}
+  .nav-link{font-size:.86rem;}
+  .nav-actions .btn{padding:.62rem 1.1rem;}
+}
+
+/* --------------------------------------------------------------------------
+   21. HEADER ACTIONS (Message us on Facebook + Get a Free Quote)
+   -------------------------------------------------------------------------- */
+.nav-actions{display:flex;align-items:center;gap:.6rem;flex-shrink:0;}
+.btn-msg .ico{width:18px;height:18px;}
+.mobile-actions{display:flex;flex-direction:column;gap:.7rem;}
+/* keep menu labels on one line */
+.nav-link{white-space:nowrap;}
+/* on mid-size screens show the Messenger button as an icon only so the menu fits */
+@media (max-width:1499px) and (min-width:1081px){
+  .nav-actions .btn-msg{padding:0;width:44px;height:44px;}
+  .nav-actions .btn-msg span{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;}
+}
+/* solid background behind the open mobile menu */
+.site-header:has(.mobile-menu.is-open){background-color:rgba(29,42,58,.98);box-shadow:0 12px 32px -14px rgba(0,0,0,.75);}
+@media (max-width:1080px){
+  .nav-actions{display:none;}
+}

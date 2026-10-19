@@ -1,0 +1,842 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Solar Calculator — Instant Solar Estimate | SolaRays Davao de Oro</title>
+<meta name="description" content="Compute your solar system size and get an instant reference price from SolaRays. Enter your monthly kWh or electric bill, choose battery backup, and compare two packages. Free consultation in Davao de Oro." />
+<meta name="theme-color" content="#1D2A3A" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+
+<link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="calculator.css" />
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+</head>
+
+<body>
+
+<!-- ==================================================================
+     HEADER / STICKY NAVIGATION (same as the homepage)
+     ================================================================== -->
+<header class="site-header" id="siteHeader">
+  <nav class="wrap nav" aria-label="Main navigation">
+
+    <a href="index.html" class="brand" aria-label="SolaRays home">
+      <img src="logo.png" alt="SolaRays Logo" class="brand-logo" width="50" height="50" />
+      <span class="logo-fallback" aria-hidden="true"><span>Sola</span>Rays</span>
+    </a>
+
+    <ul class="nav-links">
+      <li><a href="index.html#home" class="nav-link">Home</a></li>
+      <li><a href="index.html#about" class="nav-link">About</a></li>
+      <li><a href="index.html#why-solar" class="nav-link">Why Solar Now</a></li>
+      <li><a href="index.html#services" class="nav-link">Services</a></li>
+      <li><a href="index.html#payment" class="nav-link">Payment</a></li>
+      <li><a href="index.html#solar-basics" class="nav-link">Solar Basics</a></li>
+      <li><a href="calculator.html" class="nav-link is-active" aria-current="page">Solar Calculator</a></li>
+      <li><a href="index.html#contact" class="nav-link">Contact</a></li>
+    </ul>
+
+    <div class="nav-actions">
+      <a href="https://m.me/SolaRaysDavao" class="btn btn-outline btn-sm btn-msg" target="_blank" rel="noopener" aria-label="Message us on Facebook" title="Message us on Facebook"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3C6.8 3 3 6.7 3 11.4c0 2.6 1.2 4.9 3.2 6.4V21l3-1.6c.9.2 1.8.4 2.8.4 5.2 0 9-3.7 9-8.4S17.2 3 12 3z"/><path d="M7.5 13.5l3-3.2 2.2 2.2 3.8-2.2-3 3.2-2.2-2.2z"/></svg><span>Message us</span></a>
+      <a href="#send-estimate" class="btn btn-primary btn-sm">Get a Free Quote</a>
+    </div>
+
+    <button class="menu-toggle" id="menuToggle" type="button"
+            aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="mobileMenu">
+      <span></span><span></span><span></span>
+    </button>
+  </nav>
+
+  <div class="mobile-menu" id="mobileMenu">
+    <ul>
+      <li><a href="index.html#home">Home</a></li>
+      <li><a href="index.html#about">About</a></li>
+      <li><a href="index.html#why-solar">Why Solar Now</a></li>
+      <li><a href="index.html#services">Services</a></li>
+      <li><a href="index.html#payment">Payment</a></li>
+      <li><a href="index.html#solar-basics">Solar Basics</a></li>
+      <li><a href="calculator.html" aria-current="page">Solar Calculator</a></li>
+      <li><a href="index.html#contact">Contact</a></li>
+    </ul>
+    <div class="mobile-actions">
+      <a href="https://m.me/SolaRaysDavao" class="btn btn-outline btn-block btn-msg" target="_blank" rel="noopener" aria-label="Message us on Facebook"><svg class="ico" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3C6.8 3 3 6.7 3 11.4c0 2.6 1.2 4.9 3.2 6.4V21l3-1.6c.9.2 1.8.4 2.8.4 5.2 0 9-3.7 9-8.4S17.2 3 12 3z"/><path d="M7.5 13.5l3-3.2 2.2 2.2 3.8-2.2-3 3.2-2.2-2.2z"/></svg><span>Message us on Facebook</span></a>
+      <a href="#send-estimate" class="btn btn-primary btn-block">Get a Free Quote</a>
+    </div>
+  </div>
+</header>
+
+<main>
+
+<!-- ==================================================================
+     1. PAGE HERO
+     ================================================================== -->
+<section class="page-hero" id="top">
+  <div class="wrap">
+    <span class="pill"><span class="pill-dot"></span> Solar Calculator</span>
+    <h1 class="hero-title">Get an Instant <span class="accent">Solar Estimate</span></h1>
+    <p class="hero-sub">
+      Enter your monthly electricity use, choose your backup, and see the system size you need with
+      reference prices for two SolaRays packages. Installation included. Mobilization fee varies by location.
+    </p>
+    <p class="hero-disclaimer">
+      <strong>This is not an official quotation.</strong> The prices shown are for reference only. Your actual
+      quotation will be given after a free SolaRays site consultation and may change depending on your roof,
+      wiring, site access, location and actual energy use.
+    </p>
+    <ul class="hero-points">
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Takes less than a minute</li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Two package options</li>
+      <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>Installation included</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ==================================================================
+     2. CALCULATOR
+     ================================================================== -->
+<section class="section section--deep" id="calculator">
+  <div class="wrap calc-grid">
+
+    <!-- ---------- Inputs ---------- -->
+    <form class="calc-card calc-form" id="calcForm" novalidate>
+
+      <div class="calc-step">
+        <div class="step-head"><span class="step-badge">1</span><h2>Your electricity use</h2></div>
+        <p class="step-help">Look for "kWh used" or "Total consumption" on your latest electric bill.</p>
+
+        <div class="seg" role="radiogroup" aria-label="How do you want to enter your usage?">
+          <label><input type="radio" name="mode" value="kwh" checked /><span>I know my kWh</span></label>
+          <label><input type="radio" name="mode" value="bill" /><span>I know my bill (&#8369;)</span></label>
+        </div>
+
+        <div class="field" id="kwhField">
+          <label for="kwh">Monthly consumption</label>
+          <div class="input-wrap">
+            <input id="kwh" name="kwh" type="number" inputmode="decimal" min="50" max="3000" step="1" value="300" />
+            <span class="unit">kWh</span>
+          </div>
+        </div>
+
+        <div class="field" id="billField" hidden>
+          <label for="bill">Monthly electric bill</label>
+          <div class="input-wrap input-wrap--prefix">
+            <input id="bill" name="bill" type="number" inputmode="decimal" min="500" step="50" placeholder="4,000" />
+            <span class="unit">&#8369;</span>
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="field">
+            <label for="utility">Your utility</label>
+            <select id="utility" name="utility">
+              <option value="NORDECO" data-rate="12.50">NORDECO</option>
+              <option value="Davao Light" data-rate="13.09">Davao Light</option>
+              <option value="Other" data-rate="13.00">Other</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="rate">Rate per kWh</label>
+            <div class="input-wrap input-wrap--prefix">
+              <input id="rate" name="rate" type="number" inputmode="decimal" min="5" max="30" step="0.01" value="12.50" />
+              <span class="unit">&#8369;</span>
+            </div>
+          </div>
+        </div>
+        <span class="field-hint">Rates change monthly. For the most accurate estimate, use the rate on your bill.</span>
+      </div>
+
+      <div class="calc-step">
+        <div class="step-head"><span class="step-badge">2</span><h2>When do you use the most power?</h2></div>
+        <div class="opt-grid opt-grid--3">
+          <label class="opt"><input type="radio" name="pattern" value="day" />
+            <span class="opt-body"><b>Mostly daytime</b><small>Home business, shop, office, people home all day</small></span></label>
+          <label class="opt"><input type="radio" name="pattern" value="balanced" checked />
+            <span class="opt-body"><b>Day and night</b><small>Typical family home</small></span></label>
+          <label class="opt"><input type="radio" name="pattern" value="night" />
+            <span class="opt-body"><b>Mostly night</b><small>Working away by day, aircon at night</small></span></label>
+        </div>
+      </div>
+
+      <div class="calc-step">
+        <div class="step-head"><span class="step-badge">3</span><h2>Battery backup</h2></div>
+        <p class="step-help">A battery stores daytime solar for use at night and keeps power on during brownouts.</p>
+        <div class="opt-grid opt-grid--3">
+          <label class="opt"><input type="radio" name="battery" value="none" />
+            <span class="opt-body"><b>No battery</b><small>Lowest price, saves on daytime use</small></span></label>
+          <label class="opt"><input type="radio" name="battery" value="half" />
+            <span class="opt-body"><b>Partial backup</b><small>Covers about half your night use</small></span></label>
+          <label class="opt"><input type="radio" name="battery" value="full" checked />
+            <span class="opt-body"><b>Full night backup</b><small>Covers most of your night use</small></span></label>
+        </div>
+      </div>
+
+      <p class="calc-error" id="calcError" role="alert"></p>
+
+      <a href="#results" class="btn btn-primary btn-block calc-jump" id="calcJump">See my estimate</a>
+    </form>
+
+    <!-- ---------- Results ---------- -->
+    <div class="calc-card" id="results" aria-live="polite">
+      <div class="results-head">
+        <div>
+          <span class="eyebrow">Your Estimate</span>
+          <h2>Recommended solar system</h2>
+        </div>
+        <p>Reference only &middot; updates as you type</p>
+      </div>
+
+      <div id="resultsBody">
+        <div class="results-empty">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.6M12 19.4V22M2 12h2.6M19.4 12H22M4.9 4.9l1.9 1.9M17.2 17.2l1.9 1.9M19.1 4.9l-1.9 1.9M6.8 17.2l-1.9 1.9"/></svg>
+          Enter your monthly kWh or bill to see your estimate.
+        </div>
+      </div>
+
+
+      <p class="note-box calc-disclaimer">
+        <strong>Reference only, not an official quotation.</strong> Your actual quotation will be given after a
+        free SolaRays site consultation and may change depending on your roof, wiring, site access, shading and
+        actual energy use. Installation is included. Mobilization fee varies by location. Prices may change
+        without prior notice.
+      </p>
+
+      <details class="assumptions">
+        <summary>How we compute your estimate</summary>
+        <ul>
+          <li>Each 1 kW of solar panels produces about 100 kWh per month in the Davao Region (about 4.2 peak sun hours a day after system losses).</li>
+          <li>With a battery, panels are sized to cover your full monthly use. Without a battery, panels are sized to your daytime use so less power goes to waste.</li>
+          <li>Battery size is based on your night-time use. We plan to use up to 90% of the battery's capacity each day to protect its life.</li>
+          <li>The inverter is matched to the size of your panels, not oversized. Our smallest hybrid inverter is 6 kW, so small systems still use a 6 kW unit, which leaves room to add panels later.</li>
+          <li>Savings count only the solar power you use yourself. Net metering credits, if approved by your utility, are not included.</li>
+          <li>Systems above 10 kW are custom-designed after a site visit.</li>
+        </ul>
+      </details>
+    </div>
+
+  </div>
+</section>
+
+<!-- ==================================================================
+     3. SEND ESTIMATE / REQUEST FORMAL QUOTE
+     ================================================================== -->
+<section class="section section--navy ray-bg" id="send-estimate">
+  <div class="wrap quote-grid">
+
+    <div class="reveal">
+      <span class="eyebrow">Next Step</span>
+      <h2 class="section-title">Get your <span class="accent">official quotation</span></h2>
+      <p class="lead">
+        Send us your estimate and we'll schedule a free site consultation. After checking your roof and
+        wiring, we'll give you your official written quotation.
+      </p>
+
+      <div class="estimate-recap" id="estimateRecap">Your estimate will appear here.</div>
+
+      <div class="btn-row">
+        <a href="https://m.me/SolaRaysDavao" class="btn btn-outline" target="_blank" rel="noopener">Message us on Facebook</a>
+      </div>
+    </div>
+
+    <div class="form-card reveal">
+      <h3>Send me my estimate</h3>
+      <p>We'll reply within business hours (Mon&ndash;Sat, 8AM&ndash;5PM).</p>
+
+      <form id="estimateForm" novalidate>
+        <input type="text" name="_honey" tabindex="-1" autocomplete="off" aria-hidden="true"
+               style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0;" />
+
+        <div class="form-row">
+          <div class="field">
+            <label for="ename">Name</label>
+            <input id="ename" name="name" type="text" placeholder="Juan Dela Cruz" autocomplete="name" required />
+          </div>
+          <div class="field">
+            <label for="ephone">Phone</label>
+            <input id="ephone" name="phone" type="tel" placeholder="09XX XXX XXXX" autocomplete="tel" required />
+          </div>
+        </div>
+
+        <div class="field">
+          <label for="eemail">Email (optional)</label>
+          <input id="eemail" name="email" type="email" placeholder="juan@example.com" autocomplete="email" />
+        </div>
+
+        <div class="form-row">
+          <div class="field">
+            <label for="eaddress">Barangay / Town</label>
+            <input id="eaddress" name="address" type="text" placeholder="e.g. Brgy. Maligaya, San Isidro" />
+          </div>
+          <div class="field">
+            <label for="epackage">Preferred package</label>
+            <select id="epackage" name="package">
+              <option value="Premium">Premium Package</option>
+              <option value="Smart Saver">Smart Saver Package</option>
+              <option value="Not sure">Not sure yet</option>
+            </select>
+          </div>
+        </div>
+
+
+        <div class="field captcha">
+          <label for="captcha">Security check: what is <span id="captchaQ" class="captcha-q">? + ?</span> ?</label>
+          <div class="captcha-row">
+            <input id="captcha" name="captcha" type="text" inputmode="numeric" autocomplete="off" placeholder="Your answer" required />
+            <button type="button" class="captcha-refresh" id="captchaRefresh" aria-label="New question">&#8635;</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <button type="submit" id="submitBtn" class="btn btn-primary btn-block btn-lg">Send My Estimate</button>
+        </div>
+
+        <p class="form-status" id="formStatus" role="status" aria-live="polite"></p>
+        <p class="form-note">We'll never share your details. Free consultation, no obligation.</p>
+      </form>
+    </div>
+
+  </div>
+</section>
+
+</main>
+
+<!-- ==================================================================
+     FOOTER (same as the homepage)
+     ================================================================== -->
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+
+    <a href="index.html" class="brand" aria-label="SolaRays home">
+      <img src="logo.png" alt="SolaRays Logo" class="footer-logo" width="40" height="40" />
+      <span class="logo-fallback logo-fallback--footer" aria-hidden="true"><span>Sola</span>Rays</span>
+    </a>
+
+    <nav class="footer-links" aria-label="Footer navigation">
+      <a href="index.html#home">Home</a>
+      <a href="index.html#about">About</a>
+      <a href="index.html#why-solar">Why Solar Now</a>
+      <a href="index.html#services">Services</a>
+      <a href="index.html#payment">Payment</a>
+      <a href="index.html#solar-basics">Solar Basics</a>
+      <a href="calculator.html">Solar Calculator</a>
+      <a href="index.html#contact">Contact</a>
+    </nav>
+
+    <p class="footer-copy">&copy; 2026 SolaRays. All rights reserved.</p>
+
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ==================================================================
+     PRICING SETTINGS — edit these when your prices change.
+     All amounts are SolaRays SELLING prices in pesos (already marked up).
+     Keep only selling prices here: this file is public on the website.
+     ================================================================== */
+  var SETTINGS = {
+    yieldPerKwp: 100,      // kWh produced per month by 1 kWp of panels (Davao Region)
+    minPanels: 4,          // smallest system offered
+    batteryDoD: 0.9,       // usable share of battery capacity
+    inverterTolerance: 1.1,// panel kWp may be up to 10% above inverter kW
+    mountingPerPanel: 1120,// rails, clamps, L-feet, grounding per panel
+    balanceOfSystem: 20600,// PV cable, combiner box, ATS, breakers, SPD, enclosure, cable tray, fire suppression
+    batteryProtection: 1600,// battery DC breaker (only when a battery is included)
+    miscElectrical: 5000,  // AC wiring, conduits, lugs and consumables
+    installPerKwp: 5000,   // installation labor per kWp
+    installMinimum: 20000, // minimum installation fee
+    installBattery: 3000,  // extra installation when a battery is included
+    roundTo: 1000,         // round final price to the nearest
+    rangePct: 0.05         // show +/- 5% as the reference range
+  };
+
+  var PACKAGES = [
+    {
+      id: 'premium',
+      tier: 'Package 1',
+      name: 'Premium Package',
+      tag: 'Longest inverter warranty and top-brand components.',
+      featured: true,
+      panel: { brand: 'Jinko', model: '640W N-Type', warranty: 'N-Type high efficiency', watts: 640, price: 9520 },
+      inverters: [
+        { kw: 6,  brand: 'Sungrow', model: 'MG6RL hybrid',  warranty: '10-yr warranty', price: 76800 },
+        { kw: 8,  brand: 'Sungrow', model: 'MG8RL hybrid',  warranty: '10-yr warranty', price: 104000 },
+        { kw: 10, brand: 'Sungrow', model: 'MG10RL hybrid', warranty: '10-yr warranty', price: 131200 }
+      ],
+      batteries: [
+        { kwh: 5.12,  brand: 'Felicity Solar', model: 'LiFePO4 5.12 kWh',  warranty: '7-yr warranty',  price: 64900 },
+        { kwh: 10.24, brand: 'Felicity Solar', model: 'LiFePO4 10.24 kWh', warranty: '7-yr warranty',  price: 107300 },
+        { kwh: 16.07, brand: 'Dyness',         model: 'LiFePO4 16.07 kWh', warranty: '10-yr warranty', price: 177600 }
+      ]
+    },
+    {
+      id: 'saver',
+      tier: 'Package 2',
+      name: 'Smart Saver Package',
+      tag: 'Reliable brands at a lower upfront cost.',
+      featured: false,
+      panel: { brand: 'Seraphim', model: '630W', warranty: '15-yr product warranty', watts: 630, price: 8950 },
+      inverters: [
+        { kw: 6,  brand: 'GoodWe', model: 'GW6000-ES hybrid', warranty: '5-yr warranty', price: 64300 },
+        { kw: 8,  brand: 'GoodWe', model: 'GW8000-ES hybrid', warranty: '5-yr warranty', price: 91700 },
+        { kw: 10, brand: 'GoodWe', model: 'GW10K-ES hybrid',  warranty: '5-yr warranty', price: 107700 }
+      ],
+      batteries: [
+        { kwh: 5.12,  brand: 'Felicity Solar', model: 'LiFePO4 5.12 kWh',  warranty: '7-yr warranty', price: 64900 },
+        { kwh: 10.24, brand: 'Felicity Solar', model: 'LiFePO4 10.24 kWh', warranty: '7-yr warranty', price: 107300 },
+        { kwh: 15.36, brand: 'Felicity Solar', model: 'LiFePO4 15.36 kWh', warranty: '7-yr warranty', price: 142800 }
+      ]
+    }
+  ];
+
+  var DAY_SHARE = { day: 0.65, balanced: 0.5, night: 0.35 };
+  var BACKUP_SHARE = { none: 0, half: 0.5, full: 1 };
+
+  /* ---------- helpers ---------- */
+  function $(id) { return document.getElementById(id); }
+  function peso(n) { return '₱' + Math.round(n).toLocaleString('en-PH'); }
+  function num(n, d) { return Number(n).toLocaleString('en-PH', { minimumFractionDigits: d || 0, maximumFractionDigits: d || 0 }); }
+  function radio(name) { var el = document.querySelector('input[name="' + name + '"]:checked'); return el ? el.value : null; }
+  function roundTo(n, step) { return Math.round(n / step) * step; }
+  function tick() {
+    return '<span class="tick"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg></span>';
+  }
+
+  /* Cheapest set of up to 3 batteries whose total capacity covers the need */
+  function pickBatteries(options, needKwh) {
+    var best = null;
+    var n = options.length;
+    function search(i, counts, total) {
+      if (i === n) {
+        var units = counts.reduce(function (a, b) { return a + b; }, 0);
+        if (units === 0 || units > 3) return;
+        var kwh = 0, price = 0;
+        counts.forEach(function (c, k) { kwh += c * options[k].kwh; price += c * options[k].price; });
+        if (kwh + 1e-9 < needKwh) return;
+        if (!best || price < best.price) best = { counts: counts.slice(), kwh: kwh, price: price };
+        return;
+      }
+      for (var c = 0; c <= 3; c++) { counts[i] = c; search(i + 1, counts, total); }
+      counts[i] = 0;
+    }
+    search(0, new Array(n).fill(0), 0);
+    if (!best) return null;
+    best.items = [];
+    best.counts.forEach(function (c, k) { if (c) best.items.push({ qty: c, unit: options[k] }); });
+    return best;
+  }
+
+  /* ---------- core calculation ---------- */
+  function compute(input) {
+    var dayShare = DAY_SHARE[input.pattern];
+    var monthly = input.monthlyKwh;
+    var dayKwh = monthly * dayShare;
+    var nightKwh = monthly - dayKwh;
+    var withBattery = input.battery !== 'none';
+
+    var targetKwh = withBattery ? monthly : dayKwh;
+    var kwpNeeded = targetKwh / SETTINGS.yieldPerKwp;
+
+    var nightDaily = nightKwh / 30;
+    var batteryNeed = withBattery ? (nightDaily * BACKUP_SHARE[input.battery]) / SETTINGS.batteryDoD : 0;
+
+    var results = PACKAGES.map(function (pkg) {
+      var panels = Math.max(SETTINGS.minPanels, Math.ceil(kwpNeeded * 1000 / pkg.panel.watts));
+      var kwp = panels * pkg.panel.watts / 1000;
+
+      var inverter = null;
+      for (var i = 0; i < pkg.inverters.length; i++) {
+        if (pkg.inverters[i].kw * SETTINGS.inverterTolerance >= kwp) { inverter = pkg.inverters[i]; break; }
+      }
+      if (!inverter) return { pkg: pkg, custom: true, kwp: kwp, panels: panels };
+
+      var battery = withBattery ? pickBatteries(pkg.batteries, batteryNeed) : null;
+      if (withBattery && !battery) return { pkg: pkg, custom: true, kwp: kwp, panels: panels };
+
+      var materials =
+        panels * pkg.panel.price +
+        panels * SETTINGS.mountingPerPanel +
+        inverter.price +
+        (battery ? battery.price + SETTINGS.batteryProtection : 0) +
+        SETTINGS.balanceOfSystem +
+        SETTINGS.miscElectrical;
+
+      var install = Math.max(SETTINGS.installMinimum, kwp * SETTINGS.installPerKwp) +
+                    (battery ? SETTINGS.installBattery : 0);
+
+      var total = roundTo(materials + install, SETTINGS.roundTo);
+
+      var production = kwp * SETTINGS.yieldPerKwp;
+      var usedDay = Math.min(production, dayKwh);
+      var excess = Math.max(production - usedDay, 0);
+      var stored = battery
+        ? Math.min(battery.kwh * SETTINGS.batteryDoD * 30, nightKwh, excess * 0.9)
+        : 0;
+      var savedKwh = usedDay + stored;
+      var monthlySavings = savedKwh * input.rate;
+      var payback = monthlySavings > 0 ? total / (monthlySavings * 12) : null;
+
+      return {
+        pkg: pkg, custom: false, panels: panels, kwp: kwp, inverter: inverter, battery: battery,
+        total: total,
+        low: roundTo(total * (1 - SETTINGS.rangePct), SETTINGS.roundTo),
+        high: roundTo(total * (1 + SETTINGS.rangePct), SETTINGS.roundTo),
+        production: production, savedKwh: savedKwh, monthlySavings: monthlySavings,
+        offset: Math.min(savedKwh / monthly, 1), payback: payback
+      };
+    });
+
+    return {
+      monthly: monthly, dayKwh: dayKwh, nightKwh: nightKwh, kwpNeeded: kwpNeeded,
+      batteryNeed: batteryNeed, withBattery: withBattery, packages: results,
+      bill: monthly * input.rate
+    };
+  }
+
+  /* ---------- reading inputs ---------- */
+  var form = $('calcForm');
+  var errorEl = $('calcError');
+  var lastResult = null;
+
+  function readInput() {
+    var mode = radio('mode');
+    var rate = parseFloat($('rate').value);
+    var monthlyKwh;
+    if (!(rate >= 5 && rate <= 30)) return { error: 'Please enter a rate per kWh between ₱5 and ₱30.' };
+    if (mode === 'kwh') {
+      monthlyKwh = parseFloat($('kwh').value);
+    } else {
+      var bill = parseFloat($('bill').value);
+      if (!(bill > 0)) return { empty: true };
+      monthlyKwh = bill / rate;
+    }
+    if (!(monthlyKwh > 0)) return { empty: true };
+    if (monthlyKwh < 50) return { error: 'Your usage looks below 50 kWh a month. For very small systems, please message us for a custom quote.' };
+    if (monthlyKwh > 3000) return { error: 'Usage above 3,000 kWh a month needs a custom commercial design. Please book a free consultation.' };
+    return {
+      monthlyKwh: monthlyKwh,
+      rate: rate,
+      utility: $('utility').value,
+      pattern: radio('pattern'),
+      battery: radio('battery'),
+      mode: mode
+    };
+  }
+
+  /* ---------- rendering ---------- */
+  function pkgCard(r, data) {
+    var p = r.pkg;
+    var head =
+      (p.featured ? '<span class="pkg-badge">Recommended</span>' : '') +
+      '<span class="pkg-tier">' + p.tier + '</span>' +
+      '<h3 class="pkg-name">' + p.name + '</h3>' +
+      '<p class="pkg-tag">' + p.tag + '</p>';
+
+    if (r.custom) {
+      return '<article class="pkg-card pkg-custom' + (p.featured ? ' pkg-card--featured' : '') + '">' + head +
+        '<div class="pkg-price"><small>Estimated price</small><strong>Custom quote</strong>' +
+        '<span>About ' + num(r.kwp, 1) + ' kW of panels</span></div>' +
+        '<p>Your system is larger than our instant-quote range. We\'ll design it around your actual load after a free site visit.</p>' +
+        '<div class="pkg-spacer"></div><a href="#send-estimate" class="btn btn-primary btn-block">Book a free consultation</a></article>';
+    }
+
+    var items = [];
+    items.push('<li>' + tick() + '<span><b>' + r.panels + ' &times; ' + p.panel.brand + ' ' + p.panel.model + '</b> solar panels (' + num(r.kwp, 2) + ' kWp), ' + p.panel.warranty + '</span></li>');
+    items.push('<li>' + tick() + '<span><b>' + r.inverter.brand + ' ' + r.inverter.kw + ' kW ' + r.inverter.model.replace(/^\S+\s?/, '') + '</b> inverter, ' + r.inverter.warranty + '</span></li>');
+    if (r.battery) {
+      r.battery.items.forEach(function (it) {
+        items.push('<li>' + tick() + '<span><b>' + (it.qty > 1 ? it.qty + ' &times; ' : '') + it.unit.brand + ' ' + it.unit.model + '</b> battery, ' + it.unit.warranty + '</span></li>');
+      });
+    } else {
+      items.push('<li>' + tick() + '<span><b>Battery-ready</b> hybrid inverter, add a battery anytime</span></li>');
+    }
+    items.push('<li>' + tick() + '<span><b>Mounting, wiring and protection</b>: rails, PV cable, breakers, surge protection, transfer switch, enclosure</span></li>');
+    items.push('<li>' + tick() + '<span><b>Installation included</b>, 1-year workmanship warranty; mobilization fee varies by location</span></li>');
+
+
+    return '<article class="pkg-card' + (p.featured ? ' pkg-card--featured' : '') + '">' + head +
+      '<div class="pkg-price"><small>Estimated price</small><strong>' + peso(r.total) + '</strong>' +
+      '<span>Reference range ' + peso(r.low) + ' &ndash; ' + peso(r.high) + '</span></div>' +
+      '<ul class="pkg-list">' + items.join('') + '</ul>' +
+      '<div class="pkg-stats">' +
+        '<div><strong>~' + peso(roundTo(r.monthlySavings, 50)) + '</strong><span>est. monthly savings</span></div>' +
+        '<div><strong>' + (r.payback ? num(r.payback, 1) + ' yrs' : '&ndash;') + '</strong><span>est. payback</span></div>' +
+      '</div>' +
+      '<div class="pkg-spacer"></div>' +
+      '<a href="#send-estimate" class="btn ' + (p.featured ? 'btn-primary' : 'btn-outline') + ' btn-block" data-choose="' + (p.id === 'premium' ? 'Premium' : 'Smart Saver') + '">Choose this package</a>' +
+    '</article>';
+  }
+
+  function render(data) {
+    var first = data.packages[0];
+    var batteryLabel = data.withBattery
+      ? (first.battery ? num(first.battery.kwh, 1) + ' kWh' : 'Custom')
+      : 'None';
+
+    var tiles =
+      '<div class="summary-tiles">' +
+        '<div class="tile"><strong>' + num(data.monthly) + '</strong><span>kWh per month' + (radio('mode') === 'bill' ? ' (from your bill)' : '') + '</span></div>' +
+        '<div class="tile"><strong>' + num(first.kwp, 1) + ' kW</strong><span>solar panels, ' + first.panels + ' pcs</span></div>' +
+        '<div class="tile"><strong>' + (first.inverter ? first.inverter.kw + ' kW' : 'Custom') + '</strong><span>hybrid inverter</span></div>' +
+        '<div class="tile"><strong>' + batteryLabel + '</strong><span>battery storage</span></div>' +
+      '</div>';
+
+    var cards = '<div class="pkg-grid">' + data.packages.map(function (r) { return pkgCard(r, data); }).join('') + '</div>';
+
+    $('resultsBody').innerHTML = tiles + cards;
+
+    Array.prototype.forEach.call(document.querySelectorAll('[data-choose]'), function (btn) {
+      btn.addEventListener('click', function () { $('epackage').value = btn.getAttribute('data-choose'); });
+    });
+  }
+
+  function renderRecap(input, data) {
+    var parts = data.packages.map(function (r) {
+      return '<b>' + r.pkg.name + ':</b> ' + (r.custom ? 'custom quote' : peso(r.total) + ' (' + num(r.kwp, 2) + ' kWp' +
+        (r.battery ? ', ' + num(r.battery.kwh, 1) + ' kWh battery' : ', no battery') + ')');
+    });
+    $('estimateRecap').innerHTML =
+      '<b>Your estimate:</b> ' + num(data.monthly) + ' kWh/month on ' + input.utility + ' at ₱' + input.rate.toFixed(2) + '/kWh. ' +
+      parts.join(' &middot; ');
+  }
+
+  function update() {
+    var input = readInput();
+    errorEl.classList.remove('is-visible');
+    if (input.error) {
+      errorEl.textContent = input.error;
+      errorEl.classList.add('is-visible');
+      lastResult = null;
+      return;
+    }
+    if (input.empty) { lastResult = null; return; }
+    var data = compute(input);
+    lastResult = { input: input, data: data };
+    render(data);
+    renderRecap(input, data);
+  }
+
+  /* ---------- input wiring ---------- */
+  function syncMode() {
+    var mode = radio('mode');
+    $('kwhField').hidden = mode !== 'kwh';
+    $('billField').hidden = mode !== 'bill';
+  }
+  function syncRate() {
+    var opt = $('utility').options[$('utility').selectedIndex];
+    $('rate').value = opt.getAttribute('data-rate');
+  }
+
+  form.addEventListener('input', function (e) {
+    if (e.target.name === 'mode') syncMode();
+    if (e.target.id === 'utility') syncRate();
+    update();
+  });
+  form.addEventListener('change', function (e) {
+    if (e.target.name === 'mode') syncMode();
+    if (e.target.id === 'utility') syncRate();
+    update();
+  });
+  form.addEventListener('submit', function (e) { e.preventDefault(); update(); });
+
+  syncMode();
+  update();
+
+  /* ==================================================================
+     PAGE BEHAVIOUR (same as the homepage)
+     ================================================================== */
+  var header = $('siteHeader');
+  var toggle = $('menuToggle');
+  var mobileMenu = $('mobileMenu');
+
+  function onScroll() { header.classList.toggle('is-scrolled', window.scrollY > 30); }
+  window.addEventListener('scroll', onScroll, { passive: true });
+  onScroll();
+
+  function closeMenu() {
+    mobileMenu.classList.remove('is-open');
+    toggle.classList.remove('is-open');
+    toggle.setAttribute('aria-expanded', 'false');
+  }
+  toggle.addEventListener('click', function () {
+    var open = mobileMenu.classList.toggle('is-open');
+    toggle.classList.toggle('is-open', open);
+    toggle.setAttribute('aria-expanded', String(open));
+  });
+  Array.prototype.forEach.call(mobileMenu.querySelectorAll('a'), function (a) { a.addEventListener('click', closeMenu); });
+  window.addEventListener('resize', function () { if (window.innerWidth > 1080) closeMenu(); });
+
+  function headerOffset() { return (header ? header.offsetHeight : 86) + 6; }
+  document.addEventListener('click', function (e) {
+    var link = e.target.closest ? e.target.closest('a[href^="#"]') : null;
+    if (!link) return;
+    var href = link.getAttribute('href');
+    if (!href || href === '#') return;
+    var target = document.querySelector(href);
+    if (!target) return;
+    e.preventDefault();
+    var top = target.getBoundingClientRect().top + window.pageYOffset - headerOffset();
+    window.scrollTo({ top: Math.max(top, 0), behavior: 'smooth' });
+  });
+
+  var reveals = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window) {
+    var revealer = new IntersectionObserver(function (entries) {
+      entries.forEach(function (entry) {
+        if (entry.isIntersecting) { entry.target.classList.add('is-visible'); revealer.unobserve(entry.target); }
+      });
+    }, { threshold: 0.12 });
+    Array.prototype.forEach.call(reveals, function (el, i) {
+      el.style.transitionDelay = (i % 3) * 90 + 'ms';
+      revealer.observe(el);
+    });
+  } else {
+    Array.prototype.forEach.call(reveals, function (el) { el.classList.add('is-visible'); });
+  }
+
+  Array.prototype.forEach.call(document.querySelectorAll('img[src="logo.png"]'), function (img) {
+    function showFallback() {
+      img.style.display = 'none';
+      var fb = img.parentElement.querySelector('.logo-fallback');
+      if (fb) fb.style.display = 'inline-block';
+    }
+    img.addEventListener('error', showFallback);
+    if (img.complete && img.naturalWidth === 0) showFallback();
+  });
+
+  /* ==================================================================
+     SEND ESTIMATE FORM (same FormSubmit service as the homepage)
+     ================================================================== */
+  var eForm = $('estimateForm');
+  var status = $('formStatus');
+
+  var captchaAnswer = 0;
+  function newCaptcha() {
+    var a = 2 + Math.floor(Math.random() * 8);
+    var b = 2 + Math.floor(Math.random() * 8);
+    captchaAnswer = a + b;
+    $('captchaQ').textContent = a + ' + ' + b;
+    $('captcha').value = '';
+  }
+  newCaptcha();
+  $('captchaRefresh').addEventListener('click', newCaptcha);
+
+  function setStatus(message, type) {
+    status.textContent = message;
+    status.className = 'form-status is-visible ' + (type === 'error' ? 'is-error' : 'is-success');
+  }
+
+  function estimateText() {
+    if (!lastResult) return 'No estimate computed.';
+    var i = lastResult.input, d = lastResult.data;
+    var lines = [
+      'Monthly use: ' + num(d.monthly) + ' kWh (' + (i.mode === 'bill' ? 'from bill of ' + peso(d.bill) : 'entered as kWh') + ')',
+      'Utility / rate: ' + i.utility + ' at P' + i.rate.toFixed(2) + '/kWh',
+      'Usage pattern: ' + i.pattern + ' | Battery backup: ' + i.battery
+    ];
+    d.packages.forEach(function (r) {
+      if (r.custom) { lines.push(r.pkg.name + ': CUSTOM (about ' + num(r.kwp, 1) + ' kWp)'); return; }
+      lines.push(r.pkg.name + ': P' + num(r.total) + ' | ' + r.panels + ' x ' + r.pkg.panel.watts + 'W (' + num(r.kwp, 2) + ' kWp) | ' +
+        r.inverter.kw + ' kW inverter | ' + (r.battery ? num(r.battery.kwh, 2) + ' kWh battery' : 'no battery'));
+    });
+    return lines.join('\n');
+  }
+
+  var FORM_ACTION = 'https://formsubmit.co/solarays@outlook.ph';
+
+  /* Show a thank-you message after the standard (non-AJAX) fallback sends the visitor back here */
+  if (/[?&]sent=1/.test(location.search)) {
+    setStatus('Thank you! Your estimate has been sent. We will contact you to schedule your free consultation (Mon–Sat, 8AM–5PM).', 'success');
+    setTimeout(function () {
+      var t = $('send-estimate');
+      if (t) window.scrollTo({ top: t.getBoundingClientRect().top + window.pageYOffset - headerOffset() });
+    }, 300);
+  }
+
+  /* Fallback: a normal form post to FormSubmit, which then returns the visitor to this page */
+  function postNormally(payload) {
+    var f = document.createElement('form');
+    f.method = 'POST';
+    f.action = FORM_ACTION;
+    f.style.display = 'none';
+    var data = Object.assign({}, payload);
+    data._next = location.origin + location.pathname + '?sent=1#send-estimate';
+    Object.keys(data).forEach(function (k) {
+      var inp = document.createElement('textarea');
+      inp.name = k; inp.value = data[k];
+      f.appendChild(inp);
+    });
+    document.body.appendChild(f);
+    f.submit();
+  }
+
+  eForm.addEventListener('submit', function (e) {
+    e.preventDefault();
+    var name = eForm.name.value.trim();
+    var phone = eForm.phone.value.trim();
+    var email = eForm.email.value.trim();
+    var address = eForm.address.value.trim();
+
+    if (!name || !phone) { setStatus('Please enter your name and phone number.', 'error'); return; }
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { setStatus('Please enter a valid email address, or leave it blank.', 'error'); return; }
+    if (!lastResult) { setStatus('Please complete the calculator above first.', 'error'); return; }
+    if (parseInt(eForm.captcha.value, 10) !== captchaAnswer) {
+      setStatus('Wrong answer to the security question. Please try again.', 'error'); newCaptcha(); return;
+    }
+    if (eForm._honey.value) return;
+
+    if (location.protocol === 'file:') {
+      setStatus('This page is open from your computer. The form sends only once the page is on your website.', 'error');
+      return;
+    }
+
+    var btn = $('submitBtn');
+    var label = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Sending…';
+    setStatus('Sending your estimate…', 'success');
+
+    var payload = {
+      name: name,
+      phone: phone,
+      email: email || 'Not provided',
+      location: address || 'Not provided',
+      preferred_package: eForm.package.value,
+      estimate: estimateText(),
+      _subject: 'Solar Calculator estimate from ' + name,
+      _template: 'table',
+      _captcha: 'false'
+    };
+    if (email) payload._replyto = email;
+
+    fetch(FORM_ACTION.replace('formsubmit.co/', 'formsubmit.co/ajax/'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    .then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok || data.success === 'false' || data.success === false) throw new Error(data.message || 'Request failed');
+      });
+    })
+    .then(function () {
+      setStatus('Thank you, ' + name + '! Your estimate has been sent. We will contact you to schedule your free consultation (Mon–Sat, 8AM–5PM).', 'success');
+      eForm.reset(); newCaptcha();
+      btn.disabled = false; btn.textContent = label;
+    })
+    .catch(function () {
+      /* AJAX was blocked or failed: send it the standard way instead */
+      setStatus('Sending your estimate…', 'success');
+      postNormally(payload);
+    });
+  });
+
+})();
+</script>
+
+</body>
+</html>
