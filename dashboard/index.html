@@ -12,7 +12,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2316212E'/%3E%3Ccircle cx='32' cy='32' r='13' fill='%23FFB612'/%3E%3C/svg%3E">
 <title>SolaRays Dashboard</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
-<link rel="stylesheet" href="style.css?v=2026-10-24-6">
+<link rel="stylesheet" href="style.css?v=2026-10-25-1">
 </head>
 <body>
 
@@ -952,94 +952,746 @@ function openForm(name,rec,prefill){
 }
 
 /* ---------- calculator ---------- */
-const calcIn={mode:"bill",bill:6000,kwh:500,rate:12,psh:4.5,loss:20,night:50,mult:2,bos:15,panelW:620};
 const specOf=s=>String(s["Specs / Description"]||"")+" "+String(s.Brand||"");
 const kwOf=s=>{const m=specOf(s).match(/(\d+(?:\.\d+)?)\s*kW(?!h)/i);return m?parseFloat(m[1]):0};
 const kwhOf=s=>{const m=specOf(s).match(/(\d+(?:\.\d+)?)\s*kWh/i);return m?parseFloat(m[1]):0};
 const wOf=s=>{const m=specOf(s).match(/(\d{3})\s*W\b/i);return m?parseInt(m[1]):0};
-const itemName=s=>[s.Brand&&s.Brand!=="-"?s.Brand:"",String(s["Specs / Description"]).split(",").slice(0,2).join(",")].filter(Boolean).join(" ");
-function cheapest(cat,test){
-  return state.data.Suppliers.filter(s=>s.Item===cat&&num(s.SRP)>0&&(!test||test(s))).sort((a,b)=>num(a.SRP)-num(b.SRP))[0]||null;
+/* ---------- Solar calculator v2: sizing, costing, packages, quotation ---------- */
+const SEASON=[0.93,1.0,1.1,1.14,1.06,0.96,0.95,0.99,0.98,0.97,0.94,0.9]; /* estimated monthly sun pattern for Mindanao (relative to the yearly average) */
+const MDAYS=[31,28,31,30,31,30,31,31,30,31,30,31];
+const SUN_PRESETS=[["Davao Region typical",4.5],["Very sunny, open site",4.8],["Cloudier or mountain site",4.2],["Custom",null]];
+const FACING={"South":1,"East or West":0.93,"North":0.86,"Flat or mixed":0.95};
+const SHADE={"None":1,"Light (trees part of day)":0.95,"Moderate":0.87,"Heavy":0.75};
+const ROOFS=["Metal (rib type)","Tile","Concrete flat"];
+const CALC_KEYS_EQUIP=["panel","panelQty","inverter","battery","batQty","goal","backupHrs","priceBy","mult","margin","profit","manual"];
+const CALC_DEFAULT={view:"size",lt:"usage",ct:"labor",client:"",
+  mode:"kwh",kwh:500,bill:"",rate:"",utility:"",hist:Array(12).fill(""),histBasis:"avg",dayShare:40,goal:"night",backupHrs:12,growth:0,
+  sunPreset:"Davao Region typical",psh:4.5,roof:"Metal (rib type)",facing:"South",shade:"None",otherLoss:14,roofArea:"",
+  panel:"auto",panelQty:"",inverter:"auto",battery:"auto",batQty:"",usable:90,cable:50,enclosure:"Yes",
+  headRate:0,installers:1,instRate:1000,helpers:2,helpRate:650,days:"",km:15,nights:0,fuel:68,kmL:8,vehKm:6,lodging:1500,meals:400,mobMode:"Free",
+  priceBy:"margin",mult:1.6,margin:30,profit:100000,manual:"",round:1000,smallParts:3000,misc:0,warranty:2,
+  payment:"Cash",gsisLoan:"",escalate:0,aging:0.5,maxOffset:95};
+let C=JSON.parse(JSON.stringify(CALC_DEFAULT));C.editing=null;
+let PKGS=[];
+const pkKey=()=>"solarays.pk."+(C.client||"none");
+const saveCalc=()=>{lsSet("solarays.calc2",JSON.stringify(C));lsSet(pkKey(),JSON.stringify(PKGS))};
+function loadCalc(){try{const s=JSON.parse(lsGet("solarays.calc2")||"null");if(s)C=Object.assign(JSON.parse(JSON.stringify(CALC_DEFAULT)),s)}catch(e){}loadPkgs()}
+function loadPkgs(){try{const p=JSON.parse(lsGet(pkKey())||"[]");PKGS=Array.isArray(p)?p:[]}catch(e){PKGS=[]}}
+
+/* supplier catalogue */
+const warrantyOf=s=>{const m=String(s["Specs / Description"]||"").match(/(\d+)\s*-?\s*yr/i);return m?+m[1]:0};
+const supId=s=>"r"+s._row;
+function catalogue(){
+  const S=state.data.Suppliers.filter(s=>num(s.SRP)>0);
+  const pv=S.filter(s=>s.Item==="PV Module"&&wOf(s)>=200).map(s=>({id:supId(s),s,w:wOf(s),price:num(s.SRP),wy:warrantyOf(s),label:`${brandOf(s)?brandOf(s)+" ":""}${wOf(s)}W`}));
+  const inv=S.filter(s=>s.Item==="Inverter"&&kwOf(s)>0).map(s=>({id:supId(s),s,kw:kwOf(s),price:num(s.SRP),wy:warrantyOf(s),label:`${brandOf(s)?brandOf(s)+" ":""}${kwOf(s)}kW`}));
+  const bat=S.filter(s=>s.Item==="Battery"&&kwhOf(s)>=2&&/51\.2V|48V/i.test(String(s["Specs / Description"]))).map(s=>({id:supId(s),s,kwh:kwhOf(s),price:num(s.SRP),wy:warrantyOf(s),label:`${brandOf(s)?brandOf(s)+" ":""}${kwhOf(s)} kWh`}));
+  const acc=S.filter(s=>s.Item==="Accessories");
+  return {pv,inv,bat,acc};
 }
-function computeCalc(){
-  const c=calcIn;
-  const monthlyKWh=c.mode==="bill"?num(c.bill)/Math.max(0.01,num(c.rate)):num(c.kwh);
-  const daily=monthlyKWh/30;
-  const pr=1-num(c.loss)/100;
-  const kwp=daily/((num(c.psh)*pr)||1);
-  const panelW=num(c.panelW)||620;
-  const panels=Math.max(1,Math.ceil(kwp*1000/panelW));
-  const actualKwp=panels*panelW/1000;
-  const invSizes=[3,5,6,8,10,12,16,20];
-  const invKW=invSizes.find(s=>s>=actualKwp*0.9)||Math.ceil(actualKwp);
-  const battNeed=daily*num(c.night)/100/0.9;
-  const battKWh=battNeed>0?Math.ceil(battNeed/5.12)*5.12:0;
-  const prodMonthly=actualKwp*num(c.psh)*pr*30;
-  const savings=Math.min(prodMonthly,monthlyKWh)*num(c.rate);
-  const pv=cheapest("PV Module",s=>wOf(s)&&Math.abs(wOf(s)-panelW)<=10)||cheapest("PV Module");
-  const inv=cheapest("Inverter",s=>kwOf(s)>=invKW)||cheapest("Inverter");
-  const bats=state.data.Suppliers.filter(s=>s.Item==="Battery"&&num(s.SRP)>0&&kwhOf(s)>=5);
-  const perKWh=bats.length?Math.min(...bats.map(s=>num(s.SRP)/kwhOf(s))):0;
-  const pvCost=pv?num(pv.SRP)*panels:0,invCost=inv?num(inv.SRP):0,batCost=perKWh*battKWh;
-  const major=pvCost+invCost+batCost,bosCost=major*num(c.bos)/100,material=major+bosCost,sell=material*num(c.mult);
-  const payback=savings>0?sell/(savings*12):0;
-  return {monthlyKWh,daily,panels,panelW,actualKwp,invKW,battKWh,prodMonthly,savings,pv,inv,perKWh,pvCost,invCost,batCost,bosCost,material,sell,payback,hasPrices:!!(pv||inv||perKWh)};
+const modelName=s=>{const sp=String(s["Specs / Description"]||"");const m=sp.match(/(?:Hybrid,\s*)?([A-Z][A-Za-z]+\s+[A-Z0-9][\w\-\/]+)/);return (s.Brand&&s.Brand!=="-"?s.Brand+" ":"")+sp.split(",").slice(0,2).join(",").replace(/^Hybrid,\s*/,"").replace(/^LiFePO4,?\s*/,"")};
+const optLabel=x=>`${x.label} · ${String(x.s["Specs / Description"]).split(",").slice(0,2).join(",").slice(0,40)} · ${peso(x.price)} · ${x.s.Supplier}`;
+
+/* accessory price lookup: cheapest supplier row whose description matches */
+function accPick(acc,re){const m=acc.filter(s=>re.test(String(s["Specs / Description"])+" "+String(s.Brand||"")));return m.sort((a,b)=>num(a.SRP)-num(b.SRP))[0]||null}
+
+function calcRun(input){
+  const c=input||C,cat=catalogue();
+  const rate0=num(c.rate);
+  const hist=(c.hist||[]).map(num).filter(v=>v>0);
+  let monthlyKWh=c.mode==="bill"?(rate0?num(c.bill)/rate0:0):c.mode==="history"?(hist.length?(c.histBasis==="max"?Math.max(...hist):hist.reduce((a,b)=>a+b,0)/hist.length):0):num(c.kwh);
+  const rate=rate0||(num(c.bill)&&num(c.kwh)?num(c.bill)/num(c.kwh):12);
+  if(c.mode==="bill"&&!rate0)monthlyKWh=num(c.bill)/rate;
+  const bill=num(c.bill)||monthlyKWh*rate;
+  const daily=monthlyKWh/30*(1+num(c.growth)/100);
+  const psh=num(c.psh)||4.5;
+  const pr=(1-num(c.otherLoss)/100)*(SHADE[c.shade]||1)*(FACING[c.facing]||1);
+  const yld=psh*pr;
+  const kwpNeed=yld?daily/yld:0;
+  /* panels */
+  let pv=c.panel==="auto"?[...cat.pv].sort((a,b)=>a.price/a.w-b.price/b.w)[0]:cat.pv.find(x=>x.id===c.panel)||[...cat.pv].sort((a,b)=>a.price/a.w-b.price/b.w)[0];
+  const W=pv?pv.w:620;
+  const qty=num(c.panelQty)>0?Math.round(num(c.panelQty)):Math.max(1,Math.ceil(kwpNeed*1000/W));
+  const kwp=qty*W/1000;
+  /* inverter: smallest that suits the panels (panels up to about 1.2× inverter) */
+  const invFit=cat.inv.filter(x=>x.kw>=kwp*0.85).sort((a,b)=>a.kw-b.kw||a.price-b.price);
+  let inv=c.inverter==="auto"?(invFit.length?invFit.filter(x=>x.kw===invFit[0].kw).sort((a,b)=>a.price-b.price)[0]:[...cat.inv].sort((a,b)=>b.kw-a.kw)[0]):cat.inv.find(x=>x.id===c.inverter);
+  if(c.inverter==="auto-premium"){const pool=(invFit.length?invFit.filter(x=>x.kw===invFit[0].kw):cat.inv);inv=[...pool].sort((a,b)=>b.wy-a.wy||a.price-b.price)[0]}
+  /* battery */
+  const dayUse=daily*num(c.dayShare)/100,night=daily-dayUse;
+  const usable=num(c.usable)/100||0.9;
+  const needUsable=c.goal==="full"?daily:c.goal==="custom"?daily*num(c.backupHrs)/24:night;
+  const need=needUsable/usable;
+  let bat=null,batN=0;
+  const tryModel=x=>{const n=num(c.batQty)>0?Math.round(num(c.batQty)):Math.max(1,Math.ceil(need/x.kwh-0.02));return {x,n,cost:n*x.price}};
+  if(c.battery==="none"||need<=0){bat=null}
+  else if(c.battery==="auto"||c.battery==="auto-premium"){const opts=cat.bat.map(tryModel).filter(o=>o.n<=6);
+    const best=c.battery==="auto-premium"?opts.sort((a,b)=>b.x.wy-a.x.wy||a.cost-b.cost)[0]:opts.sort((a,b)=>a.cost-b.cost||b.x.wy-a.x.wy)[0];
+    if(best){bat=best.x;batN=best.n}}
+  else{const x=cat.bat.find(b=>b.id===c.battery);if(x){const o=tryModel(x);bat=x;batN=o.n}}
+  const batKWh=bat?bat.kwh*batN:0;
+  /* energy on an average day */
+  const prodDay=kwp*yld;
+  const flow=p=>{const direct=Math.min(dayUse,p),surplus=p-direct,charge=Math.min(surplus,batKWh*usable,night/0.95),out=Math.min(charge*0.95,night);return {direct,charge,out,spare:surplus-charge,grid:Math.max(0,daily-direct-out)}};
+  const f=flow(prodDay);
+  const offsetRaw=daily?(f.direct+f.out)/daily:0;
+  const offset=Math.min(num(c.maxOffset)/100||0.95,offsetRaw);
+  const prodM=SEASON.map((s,i)=>kwp*psh*s*pr*MDAYS[i]);
+  const useM=c.mode==="history"&&hist.length===12?(c.hist||[]).map(num):MDAYS.map(d=>daily*d);
+  const gridM=SEASON.map((s,i)=>flow(prodDay*s).grid*MDAYS[i]);
+  const savings=bill*offset;
+  /* roof */
+  const areaEach=W/220,areaNeed=qty*areaEach;
+  /* materials */
+  const L=[];
+  const add=(cat_,item,s,qty_,unit,group)=>{if(qty_<=0)return;L.push({cat:cat_,group:group||cat_,item,supplier:s?s.Supplier:"",qty:qty_,unit:s?num(s.SRP):unit||0,missing:!s&&!unit})};
+  if(pv)L.push({cat:"PV Module",group:"Panels",item:`${pv.s.Brand&&pv.s.Brand!=="-"?pv.s.Brand+" ":""}${String(pv.s["Specs / Description"]).split(",").slice(0,2).join(",")}`,supplier:pv.s.Supplier,qty,unit:pv.price,ref:pv});
+  if(inv)L.push({cat:"Inverter",group:"Inverter",item:String(inv.s["Specs / Description"]).replace(/^Hybrid,\s*/,"").split(",").slice(0,2).join(",")+" hybrid",supplier:inv.s.Supplier,qty:1,unit:inv.price,ref:inv});
+  if(bat)L.push({cat:"Battery",group:"Battery",item:(brandOf(bat.s)&&!String(bat.s["Specs / Description"]).includes(brandOf(bat.s))?brandOf(bat.s)+" ":"")+String(bat.s["Specs / Description"]).replace(/^LiFePO4,?\s*/,"").split(",").filter(x=>!/cycles|IP\d/i.test(x)).join(",").trim()+" LiFePO4",supplier:bat.s.Supplier,qty:batN,unit:bat.price,ref:bat});
+  const A=cat.acc,tile=/tile/i.test(c.roof);
+  const rails=2*Math.ceil(qty*0.55),conn=Math.max(0,2*Math.round(rails*0.35));
+  add("Accessories","Mounting rail, 2.4m",accPick(A,/rail(ing)?s?\b.*2\.4/i),rails,0,"Mounting");
+  add("Accessories","Rail connector",accPick(A,/rail connector/i),conn,0,"Mounting");
+  add("Accessories","Mid clamp",accPick(A,/mid clamp/i),Math.max(2,2*qty-4),0,"Mounting");
+  add("Accessories","End clamp",accPick(A,/end clamp/i),qty>=8?8:4,0,"Mounting");
+  add("Accessories","L-foot",accPick(A,/l-?foot/i),2*qty,0,"Mounting");
+  if(tile)add("Accessories","Tile hook with screw",accPick(A,/tile hook/i),qty,0,"Mounting");
+  add("Accessories","Grounding lug",accPick(A,/grounding lug/i),4,0,"Mounting");
+  add("Accessories","Grounding clip",accPick(A,/grounding clip/i),qty,0,"Mounting");
+  const big=kwp>8.5;
+  add("Accessories",`PV cable ${big?"6":"4"}mm², black & red pair (per meter)`,accPick(A,big?/pv cable.*6mm.*per meter/i:/pv cable.*4mm.*per meter/i),num(c.cable)||0,0,"PV cable");
+  add("Accessories","DC combiner box 2-in/2-out (fuses, DC MCB, DC SPD)",accPick(A,/combiner box,\s*2 in/i),1,0,"Protection");
+  const big8=inv&&inv.kw>=8;
+  add("Accessories",`DC MCCB battery breaker ${big8?"200":"160"}A`,accPick(A,big8?/MCCB.*200A/i:/MCCB.*160A/i),bat?1:0,0,"Protection");
+  add("Accessories","ATS 2P 63A",accPick(A,/ATS 2P 63A/i),1,0,"Protection");
+  add("Accessories","AC MCB 2P 63A",accPick(A,/AC MCB 2P.*,\s*63A/i),2,0,"Protection");
+  add("Accessories","AC SPD 2P",accPick(A,/AC SPD 2P/i),1,0,"Protection");
+  add("Accessories","Voltage protector 63A",accPick(A,/voltage protector/i),1,0,"Protection");
+  add("Accessories","Distribution box HT-12, waterproof",accPick(A,/HT-12/i),1,0,"Protection");
+  if(c.enclosure==="Yes")add("Accessories","Safety metal enclosure, glass window, 50×40×20cm",accPick(A,/enclosure.*50cm/i),1,0,"Protection");
+  add("Accessories","PVC cable tray with cover 5×10cm, 2m",accPick(A,/cable tray.*5cm\s*\*\s*10cm/i),Math.max(2,Math.ceil((num(c.cable)||0)/12)),0,"Protection");
+  add("Accessories",`Hot aerosol fire extinguishing device ${big8?"20":"10"}g`,accPick(A,big8?/aerosol.*20 grams/i:/aerosol.*10 grams/i),1,0,"Fire safety");
+  L.forEach(l=>l.total=l.qty*l.unit);
+  const material=L.reduce((a,l)=>a+l.total,0);
+  /* labor and mobilization */
+  const days=num(c.days)>0?num(c.days):kwp<=4?4:kwp<=8?5:kwp<=12?6:7;
+  const crew=num(c.installers)+num(c.helpers)+1;
+  const labor=(num(c.headRate)+num(c.installers)*num(c.instRate)+num(c.helpers)*num(c.helpRate))*days;
+  const trips=num(c.nights)>0?1:days;
+  const kmDriven=2*num(c.km)*trips*1.1;
+  const fuel=num(c.kmL)?kmDriven/num(c.kmL)*num(c.fuel):0,vehicle=kmDriven*num(c.vehKm);
+  const lodging=num(c.nights)*num(c.lodging),meals=num(c.nights)>0?crew*days*num(c.meals):0;
+  const mobCost=fuel+vehicle+lodging+meals;
+  const mobFee=c.mobMode==="Charge client"?Math.ceil(mobCost/1000)*1000:0;
+  const warrantyRes=material*num(c.warranty)/100;
+  const other=num(c.smallParts)+num(c.misc)+warrantyRes;
+  const totalCost=material+labor+mobCost+other;
+  const basis=totalCost-(mobFee?mobCost:0);
+  let price=c.priceBy==="mult"?material*num(c.mult):c.priceBy==="profit"?basis+num(c.profit):c.priceBy==="manual"?num(c.manual):basis/(1-Math.min(0.9,num(c.margin)/100));
+  const rnd=num(c.round)||1;price=c.priceBy==="manual"?price:Math.ceil(price/rnd)*rnd;
+  const contract=price+mobFee,profit=contract-totalCost,margin=contract?profit/contract:0;
+  /* savings */
+  const esc=num(c.escalate)/100,age=num(c.aging)/100;
+  const cum=[0];for(let y=0;y<25;y++)cum.push(cum[y]+savings*12*Math.pow(1+esc,y)*Math.pow(1-age,y));
+  const payback=savings?contract/(savings*12):0;
+  const lo=Math.min(...SEASON),hi=Math.max(...SEASON);
+  const checks=[];
+  if(inv){const r=kwp/inv.kw;checks.push(r>1.3?["warn",`Panels (${kwp.toFixed(2)} kWp) are ${Math.round(r*100)}% of the ${inv.kw} kW inverter: some midday power will be clipped`]:r<0.7?["warn",`The ${inv.kw} kW inverter is larger than the ${kwp.toFixed(2)} kWp of panels needs`]:["ok",`Inverter ${inv.kw} kW suits ${kwp.toFixed(2)} kWp of panels (${Math.round(r*100)}%)`])}else checks.push(["bad","No inverter prices found in Suppliers"]);
+  if(needUsable>0){const cov=batKWh?Math.min(1,batKWh*usable*0.95/needUsable):0;checks.push(cov>=0.95?["ok",`Battery covers ${Math.round(cov*100)}% of the ${c.goal==="full"?"full-day":c.goal==="custom"?num(c.backupHrs)+"-hour":"night"} need (${batKWh.toFixed(2)} kWh, ${Math.round(usable*100)}% usable)`]:["warn",`Battery covers ${Math.round(cov*100)}% of the ${c.goal==="night"?"night":"backup"} need; add ${Math.max(0,need-batKWh).toFixed(1)} kWh for full coverage`])}
+  const lowM=gridM.map((g,i)=>[g,i]).filter(x=>x[0]>daily*2).map(x=>MON[x[1]]);
+  checks.push(lowM.length?["warn",`Lower sun in ${lowM.slice(0,3).join(", ")}: about ${Math.round(Math.max(...gridM))} kWh/month from the grid then`]:["ok","Production covers usage in every month"]);
+  if(num(c.roofArea))checks.push(areaNeed<=num(c.roofArea)?["ok",`Fits the roof: ${Math.round(areaNeed)} m² of ${num(c.roofArea)} m²`]:["bad",`Needs ${Math.round(areaNeed)} m² but the roof has ${num(c.roofArea)} m²`]);
+  const missing=L.filter(l=>l.missing).map(l=>l.item);
+  if(missing.length)checks.push(["warn",`No supplier price for: ${missing.slice(0,2).join(", ")}${missing.length>2?"…":""}`]);
+  const goalText=offset>=0.9?"90–100% (near-zero bill)":offset>=0.8?"80–90% savings":`${Math.floor(offset*20)*5}–${Math.floor(offset*20)*5+5}% savings`;
+  return {c,cat,monthlyKWh,daily,rate,bill,psh,pr,yld,kwpNeed,pv,W,qty,kwp,inv,bat,batN,batKWh,dayUse,night,need,usable,prodDay,f,offset,offsetRaw,prodM,useM,gridM,savings,areaNeed,areaEach,
+    lines:L,material,days,crew,labor,fuel,vehicle,lodging,meals,mobCost,mobFee,warrantyRes,other,totalCost,price,contract,profit,margin,cum,payback,
+    harvestLo:kwp*psh*pr*lo,harvestHi:kwp*psh*pr*hi,checks,goalText,annual:prodM.reduce((a,b)=>a+b,0),mult:material?price/material:0};
 }
-function calcResultHTML(){
-  const r=computeCalc();
-  return `<div class="big">
-    <div><div class="l">System</div><div class="v">${r.actualKwp.toFixed(2)}<span>kWp</span></div></div>
-    <div><div class="l">Panels</div><div class="v">${r.panels}<span>× ${r.panelW}W</span></div></div>
-    <div><div class="l">Battery</div><div class="v">${r.battKWh.toFixed(2)}<span>kWh</span></div></div>
-  </div>
-  <div class="kv">
-    <div><span>Monthly consumption</span><span>${Math.round(r.monthlyKWh)} kWh (${r.daily.toFixed(1)} kWh/day)</span></div>
-    <div><span>Hybrid inverter</span><span>${r.invKW} kW${r.inv?" · "+esc(itemName(r.inv)):""}</span></div>
-    <div><span>Expected solar output</span><span>${Math.round(r.prodMonthly)} kWh/month</span></div>
-    <div><span>Estimated savings</span><span>${peso(r.savings)}/month</span></div>
-  </div>
-  <h2 style="margin:18px 0 6px">Costing</h2>
-  ${r.hasPrices?`<div class="kv">
-    <div><span>Panels${r.pv?" ("+esc(r.pv.Supplier)+", "+peso(r.pv.SRP)+" each)":""}</span><span>${peso(r.pvCost)}</span></div>
-    <div><span>Inverter${r.inv?" ("+esc(r.inv.Supplier)+")":""}</span><span>${peso(r.invCost)}</span></div>
-    <div><span>Battery (${r.perKWh?peso(r.perKWh)+"/kWh":"no price"})</span><span>${peso(r.batCost)}</span></div>
-    <div><span>Mounting, cables, protection (${esc(calcIn.bos)}%)</span><span>${peso(r.bosCost)}</span></div>
-    <div><span>Material cost</span><span>${peso(r.material)}</span></div>
-    <div class="tot"><span>Suggested selling price</span><span>${peso(r.sell)}</span></div>
-    <div><span>Simple payback</span><span>${r.payback?r.payback.toFixed(1)+" years":"–"}</span></div>
-  </div>`:'<div class="empty">Costing fills in from your Suppliers tab once it has loaded.</div>'}
-  <p class="note">Internal estimate for planning a quotation, using the cheapest matching item in each category. The final quotation depends on the site visit, roof and actual stock.</p>
-  <div class="actions"><span></span><button class="btn" type="button" id="toConsult">Save as new client</button></div>`;
+const sysText=r=>`${r.kwp.toFixed(2)} kWp Solar · ${r.inv?r.inv.kw+" kW Hybrid":"no inverter"}${r.batKWh?" · "+(Math.round(r.batKWh*100)/100)+" kWh Battery":""}`;
+
+/* ---------- calculator screens ---------- */
+const cfield=(k,label,opts={})=>{
+  const v=opts.value!==undefined?opts.value:C[k];const id="c2-"+k;
+  const hint=opts.hint?`<span class="c2h">${esc(opts.hint)}</span>`:"";
+  const span=opts.span?` style="grid-column:span ${opts.span}"`:"";
+  if(opts.select)return `<label class="c2f"${span} for="${id}"><span>${label}${hint}</span><select id="${id}" data-c2="${k}">${opts.select.map(o=>{const [val,lab]=Array.isArray(o)?o:[o,o];return `<option value="${esc(val)}" ${String(val)===String(v)?"selected":""}>${esc(lab)}</option>`}).join("")}</select></label>`;
+  return `<label class="c2f"${span} for="${id}"><span>${label}${hint}</span><span class="c2in"><input id="${id}" data-c2="${k}" type="text" inputmode="${opts.text?"text":"decimal"}" value="${esc(v)}" placeholder="${esc(opts.ph||"")}" style="padding-right:${opts.unit?14+String(opts.unit).length*6.5:11}px">${opts.unit?`<em>${esc(opts.unit)}</em>`:""}</span></label>`;
+};
+const cseg=(k,label,items,span=2)=>`<div class="c2f" style="grid-column:span ${span}"><span>${label}</span><div class="c2seg" role="group" aria-label="${esc(label)}">${items.map(([v,l])=>`<button type="button" data-c2seg="${k}" data-v="${esc(v)}" aria-pressed="${String(C[k])===String(v)}">${esc(l)}</button>`).join("")}</div></div>`;
+const csec=t=>`<div class="c2sec">${t}</div>`;
+function c2tiles(r){
+  const t=(l,v,s,cls="")=>`<div class="c2tile"><span class="l">${l}</span><b class="${cls}">${v}</b><span class="s">${esc(s)}</span></div>`;
+  return t("PV system",r.kwp.toFixed(2)+" kWp",`${r.qty} × ${r.pv?r.pv.label:"—"}`)
+    +t("Inverter",r.inv?r.inv.kw+" kW":"–",r.inv?`${r.inv.label} · ${Math.round(r.kwp/r.inv.kw*100)}% load`:"Add inverter prices")
+    +t("Battery",r.batKWh?(Math.round(r.batKWh*100)/100)+" kWh":"None",r.bat?`${r.batN} × ${r.bat.label}`:"No battery")
+    +t("Solar offset",Math.round(r.offset*100)+"%",Math.round(r.annual).toLocaleString("en-PH")+" kWh/yr")
+    +t("Savings",shortPeso(r.savings)+"/mo",`Bill ${shortPeso(r.bill)} → ${shortPeso(r.bill-r.savings)}`,"g")
+    +t("Payback",r.payback?r.payback.toFixed(1)+" yrs":"–",`10-yr savings ${shortPeso(r.cum[10])}`)
+    +t("Selling price",peso(r.contract),`${Math.round(r.margin*100)}% margin · ${r.mult.toFixed(2)}× material`,"y");
+}
+function c2left(r){
+  const cat=r.cat;
+  if(C.view==="size"){
+    const tabs=[["usage","Usage"],["site","Site"],["equip","Equipment"]];
+    let body="";
+    if(C.lt==="usage"){
+      body=cseg("mode","Enter usage by",[["kwh","kWh"],["bill","Bill"],["history","12 months"]])
+       +(C.mode==="history"?`<div class="c2f" style="grid-column:span 2"><span>Monthly kWh, Jan to Dec <span class="c2h">${C.histBasis==="max"?"sized for highest month":"sized for the average"}</span></span><div class="c2hist">${MON.map((m,i)=>`<label><em>${m}</em><input type="text" inputmode="decimal" data-c2h="${i}" value="${esc(C.hist[i]||"")}" aria-label="${m} kWh"></label>`).join("")}</div></div>`+cseg("histBasis","Size for",[["avg","Average month"],["max","Highest month"]])
+         :cfield("kwh","Monthly kWh",{unit:"kWh",hint:C.mode==="bill"?"from bill ÷ rate":""})+cfield("bill","Monthly bill",{unit:"₱"}))
+       +cfield("utility","Utility",{text:true,ph:"NORDECO"})+cfield("rate","Rate",{unit:"₱/kWh",ph:r.rate.toFixed(2),hint:num(C.rate)?"":"auto: bill ÷ kWh"})
+       +`<div class="c2f" style="grid-column:span 2"><span>When power is used <span class="c2h">day ${C.dayShare}% · night ${100-C.dayShare}%</span></span><div class="c2day" style="--d:${C.dayShare}%"><input type="range" min="0" max="100" step="5" value="${C.dayShare}" data-c2="dayShare" aria-label="Share of power used in daytime"><span class="dl">Day ${C.dayShare}%</span><span class="nl">Night ${100-C.dayShare}%</span></div></div>`
+       +cfield("goal","Battery goal",{select:[["night","Cover night use"],["full","Full-day backup"],["custom","Custom backup hours"]]})
+       +(C.goal==="custom"?cfield("backupHrs","Backup hours",{unit:"hrs"}):cfield("growth","Future load growth",{unit:"%",hint:"new aircon etc."}));
+    }else if(C.lt==="site"){
+      body=csec("Sun and roof")+cfield("sunPreset","Location",{select:SUN_PRESETS.map(p=>[p[0],p[1]?`${p[0]} · ${p[1]} sun hrs`:"Custom"])})+cfield("psh","Peak sun hours",{unit:"hrs/day"})
+       +cfield("roof","Roof type",{select:ROOFS})+cfield("facing","Roof facing",{select:Object.keys(FACING)})
+       +cfield("shade","Shading",{select:Object.keys(SHADE)})+cfield("otherLoss","Other losses",{unit:"%",hint:"heat, wiring, dust"})
+       +cfield("roofArea","Roof area available",{unit:"m²",ph:"optional"})+cfield("cable","PV cable run",{unit:"m"})
+       +`<div class="c2note" style="grid-column:span 2">Net yield: ${r.yld.toFixed(2)} kWh per kWp per day (${Math.round(r.pr*100)}% of ideal). Monthly output follows an estimated Mindanao sun pattern.</div>`;
+    }else{
+      body=csec("Main components")
+       +cfield("panel","Panels",{select:[["auto","Auto · lowest ₱ per watt"],...cat.pv.map(x=>[x.id,optLabel(x)])],span:2})
+       +cfield("panelQty","Panel quantity",{ph:`auto: ${Math.max(1,Math.ceil(r.kwpNeed*1000/r.W))}`,unit:"pcs"})+cfield("enclosure","Metal enclosure",{select:["Yes","No"]})
+       +cfield("inverter","Inverter",{select:[["auto","Auto · lowest price that fits"],["auto-premium","Auto · longest warranty that fits"],...cat.inv.map(x=>[x.id,optLabel(x)])],span:2})
+       +cfield("battery","Battery",{select:[["auto","Auto · lowest total cost"],["auto-premium","Auto · longest warranty"],["none","No battery"],...cat.bat.map(x=>[x.id,optLabel(x)])],span:2})
+       +cfield("batQty","Battery quantity",{ph:`auto: ${r.batN||0}`,unit:"pcs"})+cfield("usable","Battery usable",{unit:"%"});
+    }
+    return `<section class="card c2left"><div class="c2tabs" role="tablist">${tabs.map(([k,l])=>`<button type="button" role="tab" data-c2lt="${k}" aria-selected="${C.lt===k}">${l}</button>`).join("")}</div><div class="c2form">${body}</div></section>`;
+  }
+  const tabs=[["labor","Labor"],["travel","Travel"],["pricing","Pricing"],["savings","Savings"]];
+  let body="";
+  if(C.ct==="labor"){
+    body=csec("Crew")+cfield("installers","Installers",{unit:"pax"})+cfield("instRate","Installer rate",{unit:"₱/day"})
+     +cfield("helpers","Helpers",{unit:"pax"})+cfield("helpRate","Helper rate",{unit:"₱/day"})
+     +cfield("headRate","Installer head rate",{unit:"₱/day"})+cfield("days","Job days",{ph:`auto: ${r.days}`,unit:"days"})
+     +`<div class="c2note" style="grid-column:span 2">Labor: ${peso(r.labor)} for ${r.days} days (${peso(r.days?r.labor/r.days:0)} per day). Job days are worked out from the system size unless you type a number.</div>`;
+  }else if(C.ct==="travel"){
+    body=csec("Mobilization")+cfield("km","Distance, one way",{unit:"km"})+cfield("nights","Overnight stays",{unit:"nights"})
+     +cfield("fuel","Diesel",{unit:"₱/L"})+cfield("kmL","Vehicle mileage",{unit:"km/L"})
+     +cfield("lodging","Lodging",{unit:"₱/night"})+cfield("meals","Meals (overnight jobs)",{unit:"₱/pax/day"})
+     +cseg("mobMode","Mobilization fee",[["Free","Free (absorbed)"],["Charge client","Charge client"]])
+     +`<div class="c2note" style="grid-column:span 2">Trip cost ${peso(r.mobCost)}${r.mobFee?` · client pays ${peso(r.mobFee)} (rounded up to ₱1,000)`:" · absorbed in the package price"}.</div>`;
+  }else if(C.ct==="pricing"){
+    const pv={mult:["mult","Material ×",""],margin:["margin","Target margin","%"],profit:["profit","Profit amount","₱"],manual:["manual","Package price","₱"]}[C.priceBy];
+    body=cseg("priceBy","Price by",[["mult","Multiplier"],["margin","Margin"],["profit","Profit"],["manual","Manual"]])
+     +cfield(pv[0],pv[1],{unit:pv[2]})+cfield("round","Round up to",{select:[["100","₱100"],["1000","₱1,000"],["5000","₱5,000"]]})
+     +cfield("smallParts","Small parts allowance",{unit:"₱",hint:"AC wire, conduit, MC4, ground rod"})+cfield("misc","Permits & misc",{unit:"₱"})
+     +cfield("warranty","Warranty reserve",{unit:"% of material"})+cfield("payment","Payment",{select:["Cash","GSIS loan"]})
+     +(C.payment==="GSIS loan"?cfield("gsisLoan","Client's tentative GSIS loan",{unit:"₱",span:2}):"");
+  }else{
+    body=csec("Savings assumptions")+cfield("escalate","Electric rate increase",{unit:"%/yr",hint:"0 = today's rate"})+cfield("aging","Panel aging",{unit:"%/yr"})
+     +cfield("maxOffset","Max bill offset",{unit:"%",hint:"fixed charges, cloudy days"})
+     +`<div class="c2f"><span>Bill after solar</span><span class="c2in ro"><input type="text" readonly tabindex="-1" value="${esc(peso(r.bill-r.savings))} / month"></span></div>`
+     +`<div class="c2note" style="grid-column:span 2">Quotation figures use the same numbers: harvest ${r.harvestLo.toFixed(0)}–${r.harvestHi.toFixed(0)} kWh/day, savings ${peso(r.savings)}/month, payback ${r.payback.toFixed(1)} years, 10-year savings ${peso(r.cum[10])}.</div>`;
+  }
+  return `<section class="card c2left"><div class="c2tabs" role="tablist">${tabs.map(([k,l])=>`<button type="button" role="tab" data-c2ct="${k}" aria-selected="${C.ct===k}">${l}</button>`).join("")}</div><div class="c2form">${body}</div></section>`;
+}
+function lineVsPrice(o){
+  return (w,h)=>{
+    const L=50,R=12,T=14,B=22,pw=w-L-R,ph=h-T-B,n=o.vals.length-1;
+    const max=niceMax(Math.max(o.price*1.15,...o.vals));const y=v=>T+ph-v/max*ph,x=i=>L+i/n*pw;let s="";
+    for(let i=0;i<=4;i++){const v=max*i/4;s+=`<line x1="${L}" x2="${L+pw}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="${COL.grid}"></line><text x="${L-6}" y="${(y(v)+3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="${COL.muted}">${i?shortPeso(v):"0"}</text>`}
+    const stepX=pw/n<34?2:1;o.vals.forEach((_,i)=>{if(i%stepX===0)s+=`<text x="${x(i).toFixed(1)}" y="${h-6}" text-anchor="${i===0?"start":i===n?"end":"middle"}" font-size="10" fill="${COL.muted}">${i===0?"Now":i===n?"Yr "+i:i}</text>`});
+    const pts=o.vals.map((v,i)=>x(i).toFixed(1)+","+y(v).toFixed(1));
+    s+=`<path d="M${L},${T+ph} L${pts.join(" L")} L${x(n).toFixed(1)},${T+ph} Z" fill="${COL.green}" fill-opacity=".14"></path><polyline class="ln" pathLength="1" points="${pts.join(" ")}" fill="none" stroke="${COL.green}" stroke-width="2.4"></polyline>`;
+    s+=`<line x1="${L}" x2="${L+pw}" y1="${y(o.price).toFixed(1)}" y2="${y(o.price).toFixed(1)}" stroke="${COL.sol}" stroke-width="2" stroke-dasharray="5 4"></line><text x="${L+pw}" y="${(y(o.price)-6).toFixed(1)}" text-anchor="end" font-size="10.5" font-weight="700" fill="${COL.sol}">Price ${esc(shortPeso(o.price))}</text>`;
+    if(o.pb>0&&o.pb<=n){const bx=x(o.pb);s+=`<line x1="${bx.toFixed(1)}" x2="${bx.toFixed(1)}" y1="${T}" y2="${T+ph}" stroke="#fff" stroke-opacity=".3" stroke-dasharray="3 3"></line><circle cx="${bx.toFixed(1)}" cy="${y(o.price).toFixed(1)}" r="5" fill="#fff"></circle>`;
+      const tw=118,tx=Math.min(bx+8,L+pw-tw);s+=`<rect x="${tx.toFixed(1)}" y="${(y(o.price)+8).toFixed(1)}" width="${tw}" height="20" rx="6" fill="#fff"></rect><text x="${(tx+tw/2).toFixed(1)}" y="${(y(o.price)+22).toFixed(1)}" text-anchor="middle" font-size="10.5" font-weight="800" fill="#16212E">Paid back in ${o.pb.toFixed(1)} yrs</text>`}
+    return `<svg class="${chartAnim?"anim":""}" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" font-family="Inter, system-ui, sans-serif">${s}</svg>`;
+  };
+}
+function c2right(r){
+  const card=(t,s,b,cls="")=>`<section class="card ${cls}"><div class="ch"><h2>${t}</h2><span>${esc(s)}</span></div>${b}</section>`;
+  if(C.view==="size"){
+    const flowRow=(parts)=>`<div class="stackbar">${parts.filter(p=>p[1]>0.05).map(([n,v,c])=>`<i style="flex:${v.toFixed(2)};background:${c}"></i>`).join("")||'<i style="flex:1;background:#26374B"></i>'}</div><div class="slist">${parts.map(([n,v,c])=>`<div class="lg"><i style="background:${c}"></i><span>${n}</span><b>${v.toFixed(1)} kWh</b></div>`).join("")}</div>`;
+    const flow=`<div class="c2flow"><div><span class="c2k">Daytime · solar makes ${r.prodDay.toFixed(1)} kWh</span>${flowRow([["Used by home in daytime",r.f.direct,COL.sol],["Charges battery",r.f.charge,COL.lav],["Spare (not used)",r.f.spare,COL.slate]])}</div>
+      <div><span class="c2k">Night · home needs ${r.night.toFixed(1)} kWh</span>${flowRow([["From battery",r.f.out,COL.lav],["From grid",Math.max(0,r.night-r.f.out),COL.coral]])}</div></div>`;
+    const checks=`<div class="c2checks">${r.checks.map(([k,t])=>`<div class="ck ${k}"><i aria-hidden="true">${k==="ok"?"✓":"!"}</i><span>${esc(t)}</span></div>`).join("")}</div>`;
+    const cols=Math.min(7,Math.max(1,Math.ceil(Math.sqrt(r.qty*2))));
+    const roof=`<div class="c2roof"><div class="panels" style="--cols:${cols}">${Array.from({length:Math.min(r.qty,40)},()=>"<i></i>").join("")}</div><div class="rt"><b>${Math.round(r.areaNeed)} m²</b><span>needed for ${r.qty} panels (${r.areaEach.toFixed(1)} m² each)</span>${num(C.roofArea)?`<span class="${r.areaNeed<=num(C.roofArea)?"okc":"badc"}">${r.areaNeed<=num(C.roofArea)?"Fits, "+Math.round(num(C.roofArea)-r.areaNeed)+" m² to spare":"Too small by "+Math.round(r.areaNeed-num(C.roofArea))+" m²"}</span>`:'<span class="c2h">Add roof area under Site to check the fit</span>'}</div></div>
+      <div class="c2mini">${[["kWh/month",Math.round(r.monthlyKWh)],["Sun hours",r.psh],["Yield/kWp",r.yld.toFixed(2)]].map(([a,b])=>`<div><span>${a}</span><b>${b}</b></div>`).join("")}</div>`;
+    return `<div class="c2right size">${card("Production vs usage","Monthly · kWh",legendHTML([[COL.sol,"Solar production"],[COL.blue,"Client usage"]])+chartSlot(barLine({labels:MON.map(m=>m[0]),bars:r.prodM.map(v=>Math.round(v)),line:r.useM.map(v=>Math.round(v)),barColor:COL.sol,lineColor:COL.blue,fmt:v=>String(Math.round(v))}),"Monthly production compared with usage"))}
+      ${card("Daily energy flow","Average day",flow)}${card("Sizing checks","Updated as you change inputs",checks)}${card("Roof fit",`${r.qty} panels`,roof)}</div>`;
+  }
+  const groups={},GMAP={"Mounting":"Mounting & cable","PV cable":"Mounting & cable","Protection":"Protection & safety","Fire safety":"Protection & safety"};r.lines.forEach(l=>{const g=GMAP[l.group]||l.group;(groups[g]=groups[g]||[]).push(l)});
+  const gRow=(g,list)=>{const tot=list.reduce((a,l)=>a+l.total,0),one=list.length===1?list[0]:null;
+    const det=one?`${one.qty} × ${one.item}`:g==="Mounting & cable"?`${/tile/i.test(C.roof)?"Tile":/concrete/i.test(C.roof)?"Concrete":"Metal"} roof mounting, ${list.length} items · ${num(C.cable)} m PV cable`:list.map(l=>l.item.replace(/,.*$/,"").replace(/\s*\(.*$/,"")).slice(0,4).join(", ")+(list.length>4?"…":"");
+    return `<div class="mrow"><b>${esc(g)}</b><span>${esc(det)}${list.some(l=>l.missing)?' <em class="badc">price missing</em>':""}</span><span>${one?peso(one.unit):""}</span><span>${peso(tot)}</span></div>`};
+  const mats=`<div class="mtable"><div class="mrow mh"><span>Item</span><span>Details</span><span>Unit</span><span>Total</span></div>${["Panels","Inverter","Battery","Mounting & cable","Protection & safety"].filter(g=>groups[g]).map(g=>gRow(g,groups[g])).join("")}</div><button type="button" class="linkbtn" data-c2act="items">View all ${r.lines.length} items with suppliers</button>`;
+  const sum=[["Material cost",r.material],[`Labor · ${r.days} days`,r.labor],[`Mobilization · ${C.km} km${num(C.nights)?" · "+C.nights+" nights":""}`,r.mobCost],[`Small parts, permits, ${C.warranty}% warranty reserve`,r.other]];
+  const sumHTML=`<div class="kv c2kv">${sum.map(([a,b])=>`<div><span>${esc(a)}</span><span>${peso(b)}</span></div>`).join("")}<div class="b"><span>Total job cost</span><span>${peso(r.totalCost)}</span></div><div class="g"><span>Gross profit · ${Math.round(r.margin*100)}% margin</span><span>${peso(r.profit)}</span></div>${r.mobFee?`<div><span>Package price</span><span>${peso(r.price)}</span></div><div><span>Mobilization fee to client</span><span>${peso(r.mobFee)}</span></div>`:""}<div class="tot"><span>${r.mobFee?"Total contract price":"Selling price"}</span><span>${peso(r.contract)}</span></div></div>`;
+  const mini=`<div class="c2mini">${[["10-yr savings",shortPeso(r.cum[10]),"g"],["25-yr savings",shortPeso(r.cum[25]),"g"],["25-yr return",(r.contract?(r.cum[25]/r.contract).toFixed(1):"0")+"×",""]].map(([a,b,c])=>`<div><span>${a}</span><b class="${c}">${b}</b></div>`).join("")}</div>`;
+  return `<div class="c2right cost">${card("Materials","From your Suppliers tab",mats,"c2mat")}${card("Job cost and price","Internal only",sumHTML)}${card("Savings vs price","10 years",legendHTML([[COL.green,"Cumulative savings"],[COL.sol,"Contract price"]])+chartSlot(lineVsPrice({vals:r.cum.slice(0,11),price:r.contract,pb:r.payback}),"Cumulative savings over 10 years against the price")+mini)}</div>`;
+}
+const TIER_COLORS=["#B9A6FF","#FFB612","#6CB4FF","#4FD18B","#FF7A59","#3DD6C6"];
+function pkgRun(p){return calcRun({...C,...p.cfg})}
+function c2packages(){
+  const runs=PKGS.map(p=>({p,r:pkgRun(p)}));
+  const card=({p,r},i)=>{const col=TIER_COLORS[i%6];
+    return `<section class="pkcard ${p.sel===false?"off":""}" style="--c:${col}"><div class="pkh"><span class="pkdot"></span><input class="pkname" data-pkname="${i}" value="${esc(p.label)}" aria-label="Package ${i+1} name"><button type="button" class="pksel" data-pksel="${i}" aria-pressed="${p.sel!==false}" aria-label="Include in quotation"></button></div>
+      <div class="pkeq">${[["Panels",`${r.qty} × ${r.pv?r.pv.label:"—"}`],["Inverter",r.inv?`${r.inv.label}${r.inv.wy?" · "+r.inv.wy+"-yr":""}`:"—"],["Battery",r.bat?`${r.batN} × ${r.bat.label}${r.bat.wy?" · "+r.bat.wy+"-yr":""}`:"None"]].map(([a,b])=>`<div><span>${a}</span><b>${esc(b)}</b></div>`).join("")}</div>
+      <div class="pkstats">${[["System",r.kwp.toFixed(2)+" kWp"],["Storage",(Math.round(r.batKWh*10)/10)+" kWh"],["Offset",Math.round(r.offset*100)+"%"],["Savings",shortPeso(r.savings)+"/mo"]].map(([a,b])=>`<div><span>${a}</span><b>${b}</b></div>`).join("")}</div>
+      <div class="pkprice"><span>${r.mobFee?"Total contract price":"Selling price"}</span><b>${peso(r.contract)}</b><em>${Math.round(r.margin*100)}% · ${shortPeso(r.profit)} profit · payback ${r.payback.toFixed(1)} yrs</em></div>
+      <div class="pkact"><button type="button" class="btn ghost sm" data-pkedit="${i}">Edit</button><button type="button" class="btn ghost sm" data-pkup="${i}" ${i?"":"disabled"} aria-label="Move left">←</button><button type="button" class="btn ghost sm" data-pkrm="${i}" aria-label="Remove package">×</button></div></section>`};
+  const cards=runs.map(card).join("")+(PKGS.length<6?`<button type="button" class="pkadd" data-c2act="pkadd"><b>+</b><span>Add current setup</span><em>${PKGS.length} of 6</em></button>`:"");
+  const empty=!PKGS.length?`<div class="pkempty"><b>No packages yet</b><span>Set up a system in Sizing and Costing, then tap Add current setup. Or let the calculator suggest three options from your supplier prices.</span><button type="button" class="btn" data-c2act="suggest">Suggest Premium, Standard, Value</button></div>`:"";
+  const sel=runs.filter(x=>x.p.sel!==false);
+  const cmp=runs.length&&runs.length<=3?`<div class="pkcmp" style="--n:${runs.length}"><span></span>${runs.map(({p},i)=>`<b style="color:${TIER_COLORS[i]}">${esc(p.label)}</b>`).join("")}${[["Price",x=>peso(x.contract)],["Savings / month",x=>peso(x.savings)],["Payback",x=>x.payback.toFixed(1)+" yrs"],["Inverter warranty",x=>x.inv&&x.inv.wy?x.inv.wy+" yrs":"–"],["Battery warranty",x=>x.bat&&x.bat.wy?x.bat.wy+" yrs":"–"]].map(([l,fn])=>`<span>${l}</span>${runs.map(({r})=>`<em>${fn(r)}</em>`).join("")}`).join("")}</div>`:"";
+  return `<div class="c2pk ${PKGS.length>3?"many":""}">${empty||`<div class="pkgrid" style="--n:${Math.min(PKGS.length+(PKGS.length<6?1:0),4)}">${cards}</div>`}
+    <section class="card pkbar">${cmp||`<div class="pkinfo"><b>${sel.length} package${sel.length===1?"":"s"} selected for the quotation</b><span>Tap the circle on a package to include or leave it out.</span></div>`}
+      <div class="pkgo"><span>Quotation uses your SolaRays template: one page for the client with prices only, plus an Internal Costing sheet for you.</span><div class="row"><button type="button" class="btn ghost sm" data-c2act="suggest">Suggest 3</button><button type="button" class="btn" data-c2act="quote">Send ${sel.length>1?sel.length+" packages":"to quotation"}${sel.length>1?" to quotation":""}</button></div></div></section></div>`;
 }
 function calcView(){
-  const c=calcIn;
-  const pvOpts=[...new Set([620,640,...state.data.Suppliers.filter(s=>s.Item==="PV Module").map(wOf).filter(Boolean)])].sort((a,b)=>a-b);
-  return header("Solar Calculator","Size a hybrid system from the client's bill")+
-  `<div class="calc"><div class="panel"><div class="form" id="calcForm">
-    <div class="f full"><label>Based on</label><div class="seg"><button type="button" data-mode="bill" aria-pressed="${c.mode==="bill"}">Monthly bill (₱)</button><button type="button" data-mode="kwh" aria-pressed="${c.mode==="kwh"}">Monthly kWh</button></div></div>
-    <div class="f" ${c.mode==="bill"?"":"hidden"}><label for="c-bill">Monthly bill (₱)</label><input id="c-bill" data-c="bill" inputmode="decimal" value="${esc(c.bill)}"></div>
-    <div class="f" ${c.mode==="kwh"?"":"hidden"}><label for="c-kwh">Monthly kWh</label><input id="c-kwh" data-c="kwh" inputmode="decimal" value="${esc(c.kwh)}"></div>
-    <div class="f"><label for="c-rate">Rate (₱/kWh)</label><input id="c-rate" data-c="rate" inputmode="decimal" value="${esc(c.rate)}"><span class="hint">From the client's latest bill</span></div>
-    <div class="f"><label for="c-psh">Peak sun hours</label><input id="c-psh" data-c="psh" inputmode="decimal" value="${esc(c.psh)}"></div>
-    <div class="f"><label for="c-loss">System losses (%)</label><input id="c-loss" data-c="loss" inputmode="decimal" value="${esc(c.loss)}"></div>
-    <div class="f"><label for="c-night">Night use on battery (%)</label><input id="c-night" data-c="night" inputmode="decimal" value="${esc(c.night)}"><span class="hint">Share of daily kWh used after sunset</span></div>
-    <div class="f"><label for="c-panelW">Panel size (W)</label><select id="c-panelW" data-c="panelW">${pvOpts.map(w=>`<option ${w==c.panelW?"selected":""}>${w}</option>`).join("")}</select></div>
-    <div class="f"><label for="c-bos">Balance of system (%)</label><input id="c-bos" data-c="bos" inputmode="decimal" value="${esc(c.bos)}"><span class="hint">Mounting, cables, breakers</span></div>
-    <div class="f"><label for="c-mult">Selling price multiplier</label><input id="c-mult" data-c="mult" inputmode="decimal" value="${esc(c.mult)}"><span class="hint">Material cost × this</span></div>
-  </div></div>
-  <div class="panel result" id="calcOut">${calcResultHTML()}</div></div>`;
+  const r=calcRun();
+  const clients=[...state.data.Clients].sort((a,b)=>String(a.Client).localeCompare(String(b.Client)));
+  const view=[["size","Sizing"],["cost","Costing"],["pkg","Packages"+(PKGS.length?` (${PKGS.length})`:"")]];
+  return `<div class="c2head"><div class="c2t"><h1>Solar Calculator</h1><label class="c2client"><span>Client</span><select data-c2="client" aria-label="Client"><option value="">No client selected</option>${clients.map(c=>`<option value="${esc(c["S.N."])}" ${String(c["S.N."])===String(C.client)?"selected":""}>${esc(c.Client)}</option>`).join("")}</select></label></div>
+    <div class="row"><div class="period c2views" role="tablist">${view.map(([k,l])=>`<button type="button" role="tab" data-c2view="${k}" aria-pressed="${C.view===k}">${l}</button>`).join("")}</div>${C.editing!=null&&PKGS[C.editing]?`<button type="button" class="btn ghost" data-c2act="pkcancel">Cancel edit</button><button type="button" class="btn" data-c2act="pkupdate">Update ${esc(PKGS[C.editing].label)}</button>`:`${C.view!=="pkg"?`<button type="button" class="btn ghost" data-c2act="pkadd" ${PKGS.length>=6?"disabled":""}>+ Package</button>`:""}<button type="button" class="btn ghost" data-c2act="saveclient">Save to client</button><button type="button" class="btn" data-c2act="quote">Send to quotation</button>`}</div></div>
+  <div class="c2tiles" id="c2tiles">${c2tiles(r)}</div>
+  <div class="c2body v-${C.view}" id="c2body">${C.view==="pkg"?c2packages():c2left(r)+`<div id="c2r" class="c2rwrap">${c2right(r)}</div>`}</div>`;
 }
-function bindCalc(){
-  const upd=()=>{$("#calcOut").innerHTML=calcResultHTML();bindToConsult()};
-  document.querySelectorAll("[data-c]").forEach(el=>el.addEventListener("input",()=>{calcIn[el.dataset.c]=el.tagName==="SELECT"?num(el.value):el.value;lsSet("solarays.calc",JSON.stringify(calcIn));upd()}));
-  document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{calcIn.mode=b.dataset.mode;render()});
-  bindToConsult();
+function calcRefresh(){
+  const r=calcRun();const t=$("#c2tiles");if(t)t.innerHTML=c2tiles(r);
+  const rr=$("#c2r");if(rr){CHARTS={};chartSeq=0;rr.innerHTML=c2right(r);requestAnimationFrame(()=>drawCharts(false))}
+  saveCalc();
 }
-function bindToConsult(){
-  const b=$("#toConsult");if(!b)return;
-  b.onclick=()=>{const r=computeCalc();const bill=calcIn.mode==="bill"?num(calcIn.bill):Math.round(r.monthlyKWh*num(calcIn.rate));openForm("Clients",null,{"kWh":Math.round(r.monthlyKWh),"Amount":bill,"Rate per kWh":num(calcIn.rate),"Consulted (Y/N)":"Yes","Consultation Date":today(),
-    Notes:`Calculator: ${r.actualKwp.toFixed(2)} kWp (${r.panels} x ${r.panelW}W), ${r.invKW}kW hybrid inverter, ${r.battKWh.toFixed(2)}kWh battery. Suggested price ${peso(r.sell)}.`})};
+function bindCalc(){requestAnimationFrame(()=>drawCharts(true))}
+function applyClient(no){
+  saveCalc();C.client=no;loadPkgs();
+  const c=clientByNo(no);
+  if(c){if(num(c.kWh)){C.kwh=num(c.kWh);C.mode="kwh"}if(num(c.Amount))C.bill=Math.round(num(c.Amount)*100)/100;if(num(c["Rate per kWh"]))C.rate=num(c["Rate per kWh"]);if(c.DU)C.utility=c.DU}
+  saveCalc();
 }
+function suggestPackages(){
+  const base={panel:C.panel,panelQty:"",goal:C.goal,backupHrs:C.backupHrs,priceBy:C.priceBy,mult:C.mult,margin:C.margin,profit:C.profit,manual:""};
+  const std=calcRun({...C,...base,inverter:"auto",battery:"auto",batQty:""});
+  const halfN=std.bat?Math.max(1,Math.round(std.batN/2)):"";
+  PKGS=[{label:"Premium",cfg:{...base,inverter:"auto-premium",battery:"auto-premium",batQty:""},sel:true},
+        {label:"Standard",cfg:{...base,inverter:"auto",battery:"auto",batQty:""},sel:true},
+        {label:"Value",cfg:{...base,inverter:"auto",battery:std.bat?std.bat.id:"auto",batQty:halfN},sel:true}];
+  saveCalc();
+}
+function showItems(){
+  const r=calcRun();
+  const v=document.createElement("div");v.className="viewer files";v.setAttribute("role","dialog");v.setAttribute("aria-label","All items");
+  v.innerHTML=`<div class="allwrap"><div class="hd"><h2>All materials · ${peso(r.material)}</h2><button type="button" class="btn" data-vclose>Done</button></div>
+  <div class="mtable full"><div class="mrow mh"><span>Item</span><span>Supplier</span><span>Qty × unit</span><span>Total</span></div>${r.lines.map(l=>`<div class="mrow"><b>${esc(l.item)}</b><span>${esc(l.supplier||"no price in Suppliers")}</span><span>${l.qty} × ${peso(l.unit)}</span><span>${peso(l.total)}</span></div>`).join("")}</div>
+  <p class="note">Quantities are worked out from the panel count, roof type and cable run. Edit prices in your Suppliers tab; the calculator always uses the cheapest matching item.</p></div>`;
+  document.body.appendChild(v);v.addEventListener("click",e=>{if(e.target===v||e.target.closest("[data-vclose]"))v.remove()});
+}
+async function saveCalcToClient(){
+  const r=calcRun();
+  const c=clientByNo(C.client);
+  const pk=PKGS.length?PKGS.map((p,i)=>{const x=pkgRun(p);return {name:`Package ${i+1} — ${p.label}: ${sysText(x)}`,price:x.contract}}):[];
+  if(!c){openForm("Clients",null,{"kWh":Math.round(r.monthlyKWh),"Amount":Math.round(r.bill),"Rate per kWh":Math.round(r.rate*100)/100,DU:C.utility,"Consulted (Y/N)":"Yes","Consultation Date":today(),
+    Notes:`Calculator: ${sysText(r)}, ${r.qty} × ${r.pv?r.pv.label:""}. Suggested price ${peso(r.contract)}.`,Packages:serializePackages(pk)});return}
+  const rec={...c,"kWh":Math.round(r.monthlyKWh),"Amount":Math.round(r.bill*100)/100,"Rate per kWh":Math.round(r.rate*100)/100,"Consulted (Y/N)":"Yes"};
+  if(C.utility)rec.DU=C.utility;if(!toISO(c["Consultation Date"]))rec["Consultation Date"]=today();
+  if(pk.length){rec.Packages=serializePackages(pk);rec["Quoted Price"]=Math.min(...pk.map(p=>p.price))}
+  if(await saveRecord("Clients",rec,false,c))toast("Saved to "+c.Client);
+}
+
+
+/* ---------- tiny .xlsx writer (no outside library: works on the iPad without extra downloads) ---------- */
+const MiniXLSX=(()=>{
+  const xe=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])).replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,"");
+  const colNum=s=>s.split("").reduce((a,c)=>a*26+c.charCodeAt(0)-64,0);
+  const colName=n=>{let s="";while(n>0){const m=(n-1)%26;s=String.fromCharCode(65+m)+s;n=Math.floor((n-1)/26)}return s};
+  const parse=a=>{const m=/^([A-Z]+)(\d+)$/.exec(a);return {c:colNum(m[1]),r:+m[2]}};
+  class Cell{constructor(){this.value=null}}
+  class Row{constructor(ws,r){this.ws=ws;this.r=r;this.height=undefined}getCell(i){return this.ws._cell(this.r,i)}}
+  class Sheet{
+    constructor(name,opt){this.name=name;this.rows=new Map();this.cells=new Map();this.merges=[];this.columns=[];this.pageSetup={};this.grid=!(opt&&opt.views&&opt.views[0]&&opt.views[0].showGridLines===false)}
+    _cell(r,c){const k=r+":"+c;let x=this.cells.get(k);if(!x){x=new Cell();this.cells.set(k,x)}return x}
+    getCell(a){const p=parse(a);return this._cell(p.r,p.c)}
+    getRow(r){let x=this.rows.get(r);if(!x){x=new Row(this,r);this.rows.set(r,x)}return x}
+    mergeCells(rng){this.merges.push(rng)}
+  }
+  function crcTable(){const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xEDB88320^(c>>>1):c>>>1;t[n]=c>>>0}return t}
+  let CT=null;const crc32=b=>{CT=CT||crcTable();let c=0xFFFFFFFF;for(let i=0;i<b.length;i++)c=CT[(c^b[i])&255]^(c>>>8);return (c^0xFFFFFFFF)>>>0};
+  function zip(files){/* stored (no compression) zip */
+    const enc=new TextEncoder(),parts=[],central=[];let off=0;
+    const u16=v=>[v&255,(v>>>8)&255],u32=v=>[v&255,(v>>>8)&255,(v>>>16)&255,(v>>>24)&255];
+    for(const [name,str] of files){const data=enc.encode(str),nm=enc.encode(name),crc=crc32(data);
+      const head=new Uint8Array([...u32(0x04034b50),...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(crc),...u32(data.length),...u32(data.length),...u16(nm.length),...u16(0)]);
+      parts.push(head,nm,data);
+      central.push(new Uint8Array([...u32(0x02014b50),...u16(20),...u16(20),...u16(0x0800),...u16(0),...u16(0),...u16(0x21),...u32(crc),...u32(data.length),...u32(data.length),...u16(nm.length),...u16(0),...u16(0),...u16(0),...u16(0),...u32(0),...u32(off)]),nm);
+      off+=head.length+nm.length+data.length}
+    const csize=central.reduce((a,b)=>a+b.length,0);
+    const end=new Uint8Array([...u32(0x06054b50),...u16(0),...u16(0),...u16(files.length),...u16(files.length),...u32(csize),...u32(off),...u16(0)]);
+    const all=[...parts,...central,end],out=new Uint8Array(all.reduce((a,b)=>a+b.length,0));let p=0;for(const a of all){out.set(a,p);p+=a.length}return out}
+  class Workbook{
+    constructor(){this.sheets=[];const wb=this;this.xlsx={writeBuffer:async()=>wb._build()}}
+    addWorksheet(name,opt){const s=new Sheet(name,opt);this.sheets.push(s);return s}
+    _build(){
+      const fonts=[],fills=['<fill><patternFill patternType="none"/></fill>','<fill><patternFill patternType="gray125"/></fill>'],borders=['<border><left/><right/><top/><bottom/><diagonal/></border>'],numFmts=[],xfs=[];
+      const idx=(arr,x)=>{let i=arr.indexOf(x);if(i<0){arr.push(x);i=arr.length-1}return i};
+      const fontXml=f=>{f=f||{};return `<font>${f.bold?"<b/>":""}${f.italic?"<i/>":""}<sz val="${f.size||10}"/><color rgb="${(f.color&&f.color.argb)||"FF000000"}"/><name val="${xe(f.name||"Arial")}"/></font>`};
+      idx(fonts,fontXml({}));
+      const side=(n,s)=>s&&s.style?`<${n} style="${s.style}"><color rgb="${(s.color&&s.color.argb)||"FF000000"}"/></${n}>`:`<${n}/>`;
+      const styleOf=c=>{
+        const f=idx(fonts,fontXml(c.font));
+        const fi=c.fill&&c.fill.fgColor?idx(fills,`<fill><patternFill patternType="solid"><fgColor rgb="${c.fill.fgColor.argb}"/><bgColor indexed="64"/></patternFill></fill>`):0;
+        const b=c.border?idx(borders,`<border>${side("left",c.border.left)}${side("right",c.border.right)}${side("top",c.border.top)}${side("bottom",c.border.bottom)}<diagonal/></border>`):0;
+        const nf=c.numFmt?164+idx(numFmts,c.numFmt):0;
+        const a=c.alignment||{};const al=Object.keys(a).length?`<alignment${a.horizontal?` horizontal="${a.horizontal}"`:""}${a.vertical?` vertical="${a.vertical==="middle"?"center":a.vertical}"`:""}${a.wrapText?' wrapText="1"':""}${a.indent?` indent="${a.indent}"`:""}/>`:"";
+        return idx(xfs,`<xf numFmtId="${nf}" fontId="${f}" fillId="${fi}" borderId="${b}" xfId="0"${nf?' applyNumberFormat="1"':""} applyFont="1"${fi?' applyFill="1"':""}${b?' applyBorder="1"':""}${al?' applyAlignment="1">'+al+"</xf>":"/>"}`)};
+      idx(xfs,'<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>');
+      const defined=[];
+      const sheetXml=(s,si)=>{
+        const byRow=new Map();for(const [k,c] of s.cells){const [r,col]=k.split(":").map(Number);if(!byRow.has(r))byRow.set(r,[]);byRow.get(r).push([col,c])}
+        for(const r of s.rows.keys())if(!byRow.has(r))byRow.set(r,[]);
+        const rows=[...byRow.keys()].sort((a,b)=>a-b).map(r=>{const R=s.rows.get(r);const cells=byRow.get(r).sort((a,b)=>a[0]-b[0]).map(([col,c])=>{
+            const ref=colName(col)+r,st=styleOf(c),v=c.value;const sa=st?` s="${st}"`:"";
+            if(v===null||v===undefined||v==="")return `<c r="${ref}"${sa}/>`;
+            if(typeof v==="number")return isFinite(v)?`<c r="${ref}"${sa}><v>${v}</v></c>`:`<c r="${ref}"${sa}/>`;
+            if(typeof v==="object"&&v.formula!==undefined){const res=v.result;
+              if(typeof res==="number")return `<c r="${ref}"${sa}><f>${xe(v.formula)}</f><v>${isFinite(res)?res:0}</v></c>`;
+              return `<c r="${ref}"${sa} t="str"><f>${xe(v.formula)}</f><v>${xe(res??"")}</v></c>`}
+            return `<c r="${ref}"${sa} t="inlineStr"><is><t xml:space="preserve">${xe(v)}</t></is></c>`}).join("");
+          return `<row r="${r}"${R&&R.height?` ht="${R.height}" customHeight="1"`:""}>${cells}</row>`}).join("");
+        const cols=s.columns.length?`<cols>${s.columns.map((c,i)=>`<col min="${i+1}" max="${i+1}" width="${c.width||9}" customWidth="1"/>`).join("")}</cols>`:"";
+        const ps=s.pageSetup||{},m=ps.margins||{};
+        if(ps.printArea){const [a,b]=ps.printArea.split(":"),pa=parse(a),pb=parse(b);defined.push(`<definedName name="_xlnm.Print_Area" localSheetId="${si}">'${xe(s.name.replace(/'/g,"''"))}'!$${colName(pa.c)}$${pa.r}:$${colName(pb.c)}$${pb.r}</definedName>`)}
+        return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">`
+          +`<sheetPr>${ps.fitToPage?'<pageSetUpPr fitToPage="1"/>':""}</sheetPr><sheetViews><sheetView workbookViewId="0"${s.grid?"":' showGridLines="0"'}${si===0?' tabSelected="1"':""}/></sheetViews><sheetFormatPr defaultRowHeight="15"/>${cols}<sheetData>${rows}</sheetData>`
+          +(s.merges.length?`<mergeCells count="${s.merges.length}">${s.merges.map(x=>`<mergeCell ref="${x}"/>`).join("")}</mergeCells>`:"")
+          +(ps.horizontalCentered?'<printOptions horizontalCentered="1"/>':"")
+          +`<pageMargins left="${m.left??0.5}" right="${m.right??0.5}" top="${m.top??0.5}" bottom="${m.bottom??0.5}" header="${m.header??0.3}" footer="${m.footer??0.3}"/>`
+          +`<pageSetup paperSize="${ps.paperSize||9}" orientation="${ps.orientation||"portrait"}"${ps.fitToPage?` fitToWidth="${ps.fitToWidth??1}" fitToHeight="${ps.fitToHeight??0}"`:""}/></worksheet>`};
+      const sheets=this.sheets.map(sheetXml);
+      const styles=`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">${numFmts.length?`<numFmts count="${numFmts.length}">${numFmts.map((f,i)=>`<numFmt numFmtId="${164+i}" formatCode="${xe(f)}"/>`).join("")}</numFmts>`:""}<fonts count="${fonts.length}">${fonts.join("")}</fonts><fills count="${fills.length}">${fills.join("")}</fills><borders count="${borders.length}">${borders.join("")}</borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${xfs.join("")}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+      const files=[
+        ["[Content_Types].xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${this.sheets.map((s,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join("")}<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/><Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`],
+        ["_rels/.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`],
+        ["docProps/core.xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>SolaRays</dc:creator><dcterms:created xsi:type="dcterms:W3CDTF">${new Date().toISOString().replace(/\.\d+Z$/,"Z")}</dcterms:created></cp:coreProperties>`],
+        ["xl/workbook.xml",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><bookViews><workbookView activeTab="0"/></bookViews><sheets>${this.sheets.map((s,i)=>`<sheet name="${xe(s.name)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join("")}</sheets>${defined.length?`<definedNames>${defined.join("")}</definedNames>`:""}<calcPr calcId="191029" fullCalcOnLoad="1"/></workbook>`],
+        ["xl/_rels/workbook.xml.rels",`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${this.sheets.map((s,i)=>`<Relationship Id="rId${i+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join("")}<Relationship Id="rId${this.sheets.length+1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`],
+        ["xl/styles.xml",styles],
+        ...sheets.map((x,i)=>[`xl/worksheets/sheet${i+1}.xml`,x])];
+      return zip(files);
+    }
+  }
+  return {Workbook};
+})();
+
+/* ---------- quotation (.xlsx in the SolaRays template) ---------- */
+const loadExcel=()=>Promise.resolve(MiniXLSX);
+const brandOf=s=>s&&s.Brand&&s.Brand!=="-"?String(s.Brand).replace(/^SunGrow$/i,"Sungrow"):"";
+function pvText(r){if(!r.pv)return "—";const sp=String(r.pv.s["Specs / Description"]);const type=/n-?type/i.test(sp)?(/bifacial/i.test(sp)?" N-Type Bifacial":" N-Type"):"";const series=(sp.match(/^(\w+)\s+Series/i)||[])[1];
+  return `${r.qty} pcs ${brandOf(r.pv.s)}${series?" "+series:""} ${r.W}W${type} (${r.kwp.toFixed(2)} kWp)${r.pv.wy?`, ${r.pv.wy}-yr product warranty`:""}`}
+function invText(r){if(!r.inv)return "—";const sp=String(r.inv.s["Specs / Description"]).replace(/^Hybrid,\s*/i,"");const model=sp.split(",")[0].trim();
+  return `${/^[A-Z]/.test(model)&&model.toLowerCase().startsWith(brandOf(r.inv.s).toLowerCase())?model:(brandOf(r.inv.s)+" "+model).trim()} ${r.inv.kw}kW Hybrid${r.inv.wy?`, ${r.inv.wy}-yr warranty`:""}`}
+function batText(r){if(!r.bat)return "None (can be added later)";const b=brandOf(r.bat.s),k=r.bat.kwh;
+  return `${r.batN} ${r.batN>1?"pcs":"pc"} ${b} LiFePO4 ${k} kWh${r.batN>1?` (${(Math.round(r.batKWh*100)/100)} kWh total)`:""}${r.bat.wy?`, ${r.bat.wy}-yr warranty`:""}`}
+const townFrom=a=>{const parts=String(a||"").split(",").map(x=>x.trim().replace(/\s*\b\d{4}\b\s*$/,"")).filter(x=>x&&!/^philippines$/i.test(x));const city=parts.find(x=>/\bcity\b/i.test(x));return city||townOf({Address:a||""})||""};
+const ymd=d=>`${d.getFullYear()}${pad(d.getMonth()+1)}${pad(d.getDate())}`;
+const dmy=iso=>{const d=new Date(iso+"T00:00:00");return `${pad(d.getDate())}-${MON[d.getMonth()]}-${d.getFullYear()}`};
+function nextQuoteNo(){const d=new Date(),k="solarays.qseq."+ymd(d);const n=num(lsGet(k))+1;return {no:`SR-${d.getFullYear()}-${pad(d.getMonth()+1)}${pad(d.getDate())}-${pad(n)}`,k,n}}
+
+function openQuote(){
+  const c=clientByNo(C.client);
+  const list=PKGS.length?PKGS.map((p,i)=>({label:p.label,cfg:p.cfg,sel:p.sel!==false})):[{label:"Solar Package",cfg:{},sel:true}];
+  const sel=list.filter(x=>x.sel);if(!sel.length){toast("Pick at least one package");return}
+  const qn=nextQuoteNo();
+  const prevSent=c&&/Sent|Revised/.test(c.Quotation||"");
+  const f=(id,label,val,extra="")=>`<div class="f"><label for="${id}">${label}</label><input id="${id}" value="${esc(val??"")}" ${extra}></div>`;
+  $("#modalRoot").innerHTML=`<div class="sheet" id="sheet"><div class="box" role="dialog" aria-modal="true" aria-labelledby="qTitle">
+    <div class="hd"><div><h2 id="qTitle">Create quotation</h2><div class="idl">${sel.length} package${sel.length>1?"s":""} · SolaRays template · Excel file</div></div><button class="x" type="button" data-close aria-label="Close">×</button></div>
+    <form class="form" id="qForm">
+      ${f("q-no","Quotation no.",qn.no+(prevSent?"-R2":""))}${f("q-date","Date",today(),'type="date"')}
+      <div class="f"><label for="q-pay">Payment</label><select id="q-pay"><option ${C.payment!=="GSIS loan"?"selected":""}>Cash</option><option value="GSIS" ${C.payment==="GSIS loan"?"selected":""}>GSIS loan (100%)</option></select></div>
+      ${f("q-valid","Valid for (days)",C.payment==="GSIS loan"?60:30,'inputmode="numeric"')}
+      ${f("q-name","Client name",c?c.Client:"")}${f("q-phone","Contact no.",c?c.Phone:"")}
+      <div class="f full">${`<label for="q-addr">Installation address</label><input id="q-addr" value="${esc(c?c.Address:"")}">`}</div>
+      ${f("q-du","Electric utility",C.utility||(c&&c.DU)||"")}<div class="f q-gsis"><label for="q-loan">Tentative GSIS loan (₱)</label><input id="q-loan" inputmode="decimal" value="${esc(C.gsisLoan||"")}" placeholder="optional"></div>
+      <div class="f full"><label>Packages in this quotation</label><div class="qpk">${list.map((p,i)=>{const r=calcRun({...C,...p.cfg});return `<div class="qpkrow"><input type="checkbox" data-qsel="${i}" ${p.sel?"checked":""} aria-label="Include ${esc(p.label)}"><input type="text" data-qlab="${i}" value="${esc(p.label)}" aria-label="Package name"><span>${esc(sysText(r))}</span><b>${peso(r.contract)}</b></div>`}).join("")}</div></div>
+      <div class="f full"><label class="chk"><input type="checkbox" id="q-drive" ${c&&cfg.api?"checked":""} ${c?"":"disabled"}> Save a copy to the client's files in Google Drive and mark the client as Quoted</label></div>
+      <p class="note full">The client page shows equipment, estimates and prices only. Supplier names and your costs stay on the Internal Costing sheet.</p>
+    </form>
+    <div class="actions"><div></div><div class="row"><button class="btn ghost" type="button" data-close>Cancel</button><button class="btn" type="button" id="qGo">Download Excel</button></div></div></div></div>`;
+  document.documentElement.classList.add("modal-open");
+  const close=()=>{closeModal=null;$("#modalRoot").innerHTML="";document.documentElement.classList.remove("modal-open")};closeModal=close;
+  const sync=()=>{const g=$("#q-pay").value==="GSIS";document.querySelectorAll(".q-gsis").forEach(x=>x.style.display=g?"":"none")};
+  $("#q-pay").addEventListener("change",()=>{const g=$("#q-pay").value==="GSIS";$("#q-valid").value=g?60:30;sync()});sync();
+  $("#sheet").addEventListener("click",e=>{if(e.target.id==="sheet"||e.target.closest("[data-close]"))close()});
+  $("#qGo").onclick=async()=>{
+    const btn=$("#qGo");
+    const chosen=list.map((p,i)=>({...p,label:(document.querySelector(`[data-qlab="${i}"]`).value||p.label).trim(),sel:document.querySelector(`[data-qsel="${i}"]`).checked})).filter(p=>p.sel);
+    if(!chosen.length){toast("Pick at least one package");return}
+    const q={no:$("#q-no").value.trim()||qn.no,date:$("#q-date").value||today(),valid:Math.max(1,num($("#q-valid").value)||30),gsis:$("#q-pay").value==="GSIS",
+      name:$("#q-name").value.trim(),phone:$("#q-phone").value.trim(),addr:$("#q-addr").value.trim(),du:$("#q-du").value.trim(),loan:num($("#q-loan").value)};
+    btn.disabled=true;btn.textContent="Building…";
+    try{
+      const runs=chosen.map(p=>({label:p.label,r:calcRun({...C,...p.cfg})}));
+      const blob=await buildQuotation(q,runs);
+      const fname=`SolaRays_Quotation_${(q.name||"Client").replace(/[^\w]+/g,"_").replace(/^_|_$/g,"")}_${q.no}.xlsx`;
+      const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download=fname;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000);
+      if(q.no.startsWith(qn.no))lsSet(qn.k,String(qn.n));
+      if(c&&$("#q-drive")&&$("#q-drive").checked){
+        btn.textContent="Saving to Drive…";
+        try{const data=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(",")[1]);fr.onerror=rej;fr.readAsDataURL(blob)});
+          const j=await api({action:"upload",sheet:TABS.Clients.sheet,label:c.Client||"",data,mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",name:fname});
+          const pk=runs.map((x,i)=>({name:`Package ${i+1} — ${x.label}: ${sysText(x.r)}`,price:x.r.contract}));
+          const rec={...c,Photos:[...photoIds(c.Photos),j.id].join(","),Quotation:prevSent?"Revised":"Sent","Quote Date":q.date,Packages:serializePackages(pk),"Quoted Price":pk.length===1?pk[0].price:Math.min(...pk.map(p=>p.price))};
+          if(rec["Chosen Package"]&&!pk.some(p=>p.name===rec["Chosen Package"]))rec["Chosen Package"]="";
+          await saveRecord("Clients",rec,false,c);toast("Quotation saved to "+(c.Client||"client"))}
+        catch(e){toast("Downloaded, but saving to Drive failed: "+errMsg(e))}
+      }else toast("Quotation downloaded");
+      close();
+    }catch(e){toast(e.message||"Could not build the quotation");btn.disabled=false;btn.textContent="Download Excel"}
+  };
+}
+
+async function buildQuotation(q,runs){
+  const ExcelJS=await loadExcel();
+  const wb=new ExcelJS.Workbook();wb.creator="SolaRays";wb.created=new Date();
+  const NAVY="FF1D2A3A",GOLD="FFFFB612",SOFT="FFF3F5F8",SLATE="FF26374B",GREEN="FF1B7F3B";
+  const thin={style:"thin",color:{argb:"FFBFC6D1"}},box={top:thin,left:thin,bottom:thin,right:thin};
+  const font=(o={})=>({name:"Arial",size:10,color:{argb:"FF1D2A3A"},...o});
+  const fill=c=>({type:"pattern",pattern:"solid",fgColor:{argb:c}});
+  const n=runs.length,gsis=q.gsis,IC="Internal Costing";
+  const anyMob=runs.some(x=>x.r.mobFee>0);
+  const town=townFrom(q.addr)||"the site";
+  const bill=runs[0].r.bill,kwh=runs[0].r.monthlyKWh;
+  const validDate=(()=>{const d=new Date(q.date+"T00:00:00");d.setDate(d.getDate()+q.valid-1);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`})();
+  const PESO='"₱"#,##0.00',PESO0='"₱"#,##0';
+
+  /* ---------- Internal Costing (built first so the client page can point at its cells) ---------- */
+  const ws=wb.addWorksheet("Quotation",{views:[{showGridLines:false}]});
+  const ic=wb.addWorksheet(IC,{views:[{showGridLines:false}]});
+  ic.columns=[{width:16},{width:50},{width:26},{width:7},{width:14},{width:16},{width:16},{width:16}];
+  ic.mergeCells("A1:H1");Object.assign(ic.getCell("A1"),{value:`Internal Costing · ${q.no} · ${q.name||"Client"} · not for the client`});
+  ic.getCell("A1").font=font({size:14,bold:true,color:{argb:"FFFFFFFF"}});ic.getCell("A1").fill=fill(NAVY);ic.getRow(1).height=26;ic.getCell("A1").alignment={vertical:"middle",indent:1};
+  const input=(cell,v,fmt)=>{const x=ic.getCell(cell);x.value=v;x.fill=fill("FFFFFF00");x.font=font({bold:true,color:{argb:"FF0000FF"}});if(fmt)x.numFmt=fmt;x.border=box};
+  const lab=(cell,t,o)=>{const x=ic.getCell(cell);x.value=t;x.font=font(o)};
+  lab("B3","Inputs (yellow cells can be changed)",{bold:true});
+  const IN={kwh:"F4",bill:"F5",yl:"F6",yh:"F7",loan:"F8",rate:"F9",months:"F10"};
+  const yLo=runs[0].r.psh*runs[0].r.pr*Math.min(...SEASON),yHi=runs[0].r.psh*runs[0].r.pr*Math.max(...SEASON);
+  [["Monthly consumption (kWh)",IN.kwh,Math.round(kwh),"#,##0"],["Monthly bill (₱)",IN.bill,Math.round(bill*100)/100,PESO],["Yield, low month (kWh per kWp per day)",IN.yl,Math.round(yLo*100)/100,"0.00"],["Yield, high month (kWh per kWp per day)",IN.yh,Math.round(yHi*100)/100,"0.00"]]
+    .forEach(([t,cell,v,f])=>{lab("B"+cell.slice(1),t);input(cell,v,f)});
+  if(gsis){[["Client's tentative GSIS loan (₱, blank if unknown)",IN.loan,q.loan||null,PESO],["GSIS interest per year",IN.rate,0.05,"0%"],["GSIS term (months)",IN.months,60,"0"]].forEach(([t,cell,v,f])=>{lab("B"+cell.slice(1),t);input(cell,v,f)})}
+  let row=12;const P=[];
+  runs.forEach(({label,r},i)=>{
+    const t=row;ic.mergeCells(`A${t}:H${t}`);const tc=ic.getCell("A"+t);tc.value=`Package ${i+1} — ${label} · ${sysText(r)}`;tc.font=font({bold:true,size:11});tc.fill=fill(GOLD);ic.getRow(t).height=20;tc.alignment={vertical:"middle",indent:1};
+    const h=ic.getRow(t+1);["Category","Item / specs","Supplier","Qty","Unit cost","Direct cost","Client price","SolaRays profit"].forEach((x,k)=>{const cl=h.getCell(k+1);cl.value=x;cl.font=font({bold:true,color:{argb:"FFFFFFFF"}});cl.fill=fill(SLATE);cl.border=box;cl.alignment={horizontal:k>2?"center":"left",vertical:"middle"}});
+    const lines=[...r.lines.map(l=>[l.cat,l.item,l.supplier||"no price in Suppliers",l.qty,l.unit]),
+      ["Labor",`Crew ${num(r.c.installers)} installer + ${num(r.c.helpers)} helpers${num(r.c.headRate)?" + head":""}, ${r.days} days`,"",r.days,r.days?r.labor/r.days:0],
+      ["Mobilization",`Fuel, vehicle${r.lodging?", lodging":""}${r.meals?", meals":""} · ${num(r.c.km)} km one way${r.mobFee?" (billed to client separately)":" (absorbed)"}`,"",1,Math.round(r.mobCost)],
+      ["Other","Small parts allowance (AC wire, conduit, MC4, grounding rod)","",1,num(r.c.smallParts)],
+      ["Other","Permits & misc","",1,num(r.c.misc)],
+      ["Other",`Warranty reserve (${num(r.c.warranty)}% of materials)`,"",1,Math.round(r.warrantyRes)]].filter(x=>x[4]>0||x[0]!=="Other");
+    const first=t+2,last=first+lines.length-1,totR=last+1,priceR=last+2;
+    lines.forEach((l,k)=>{const rr=first+k,R=ic.getRow(rr);
+      l.forEach((v,j)=>{const cl=R.getCell(j+1);cl.value=v;cl.font=font();cl.border=box;if(j===4)cl.numFmt=PESO;if(j===3)cl.alignment={horizontal:"center"}});
+      R.getCell(6).value={formula:`D${rr}*E${rr}`,result:l[3]*l[4]};
+      R.getCell(7).value={formula:`F${rr}*$G$${priceR}/$F$${totR}`,result:r.totalCost?l[3]*l[4]*r.price/r.totalCost:0};
+      R.getCell(8).value={formula:`G${rr}-F${rr}`,result:r.totalCost?l[3]*l[4]*(r.price/r.totalCost-1):0};
+      [6,7,8].forEach(j=>{R.getCell(j).numFmt=PESO;R.getCell(j).font=font();R.getCell(j).border=box});
+      if(r.lines[k]&&r.lines[k].missing)R.getCell(3).font=font({color:{argb:"FFC0392B"},italic:true});
+    });
+    const T=ic.getRow(totR);T.getCell(2).value="Total job cost (materials, labor, mobilization, other)";
+    T.getCell(6).value={formula:`SUM(F${first}:F${last})`,result:r.totalCost};T.getCell(7).value={formula:`SUM(G${first}:G${last})`,result:r.price};T.getCell(8).value={formula:`SUM(H${first}:H${last})`,result:r.price-r.totalCost};
+    for(let j=1;j<=8;j++){const cl=T.getCell(j);cl.fill=fill(SOFT);cl.font=font({bold:true});cl.border=box;if(j>5)cl.numFmt=PESO}
+    const PR=ic.getRow(priceR);PR.getCell(2).value="PACKAGE PRICE TO CLIENT (set here)";PR.getCell(2).font=font({bold:true});input("G"+priceR,r.price,PESO);
+    /* summary for this package */
+    let s=priceR+2;const S={};
+    const put=(key,t,formula,result,fmt)=>{lab("B"+s,t);const cl=ic.getCell("F"+s);cl.value=formula?{formula,result}:result;cl.numFmt=fmt;cl.font=font({bold:key==="contract"||key==="profit"});cl.border=box;S[key]="F"+s;s++};
+    put("kwp","PV system (kWp)",null,Math.round(r.kwp*100)/100,"0.00");
+    put("bat","Battery (kWh)",null,Math.round(r.batKWh*100)/100,"0.00");
+    put("lo","Est. daily harvest, low (kWh)",`F${s-2}*${IN.yl}`,r.kwp*yLo,"0.0");
+    put("hi","Est. daily harvest, high (kWh)",`F${s-3}*${IN.yh}`,r.kwp*yHi,"0.0");
+    put("off","Est. bill offset (energy model, capped)",null,Math.round(r.offset*1000)/1000,"0%");
+    put("sav","Est. monthly savings",`${S.off}*${IN.bill}`,r.savings,PESO);
+    put("mob","Mobilization fee to client",null,r.mobFee,PESO);
+    put("contract","Total contract price",`G${priceR}+${S.mob}`,r.contract,PESO);
+    put("profit","Gross profit",`${S.contract}-F${totR}`,r.profit,PESO);
+    put("margin","Margin",`IF(${S.contract}=0,0,${S.profit}/${S.contract})`,r.margin,"0.0%");
+    put("pay","Payback (years)",`IF(${S.sav}=0,0,${S.contract}/(${S.sav}*12))`,r.payback,"0.0");
+    const k10=r.savings?r.cum[10]/r.savings:120;
+    put("s10","Est. 10-year savings",`${S.sav}*${k10.toFixed(4)}`,r.cum[10],PESO);
+    put("roi","10-year ROI",`IF(${S.contract}=0,0,(${S.s10}-${S.contract})/${S.contract})`,r.contract?(r.cum[10]-r.contract)/r.contract:0,"0%");
+    if(gsis){const L=q.loan||r.contract;put("amort","Est. monthly amortization (GSIS)",`IF(${IN.loan}="",${S.contract},${IN.loan})*(1+${IN.rate}*${IN.months}/12)/${IN.months}`,L*(1+0.05*60/12)/60,PESO)}
+    P.push({S,priceR,r,label});row=s+2;
+  });
+  lab("B"+row,"Notes",{bold:true});
+  ["Savings use the energy model: daytime use is covered first, then the battery covers the night; the result is capped at the max bill offset for fixed charges and cloudy days.",
+   "Changing a yellow price recalculates profit, payback and the client page. Changing equipment needs a new quotation from the calculator.",
+   `Rate increase assumed: ${num(C.escalate)}%/yr. Panel aging: ${num(C.aging)}%/yr.`].forEach((t,k)=>{ic.mergeCells(`B${row+1+k}:H${row+1+k}`);lab("B"+(row+1+k),t,{italic:true,color:{argb:"FF777777"},size:9})});
+  ic.pageSetup={orientation:"landscape",fitToPage:true,fitToWidth:1,fitToHeight:0,paperSize:9,margins:{left:0.4,right:0.4,top:0.4,bottom:0.4,header:0.2,footer:0.2}};
+
+  /* ---------- Quotation (client page) ---------- */
+  ws.columns=[{width:26},{width:30},{width:30},{width:30},{width:2}];
+  const merge=(r,a="A",b="D")=>ws.mergeCells(`${a}${r}:${b}${r}`);
+  const band=(r,h,o)=>{for(const c of"ABCD")ws.getCell(c+r).fill=fill(o||NAVY);if(h)ws.getRow(r).height=h};
+  band(1,40);band(2,16);band(3,16);merge(1);merge(2);merge(3);
+  Object.assign(ws.getCell("A1"),{value:"SolaRays"});ws.getCell("A1").font=font({size:30,bold:true,color:{argb:GOLD}});ws.getCell("A1").alignment={vertical:"middle",indent:1};
+  ws.getCell("A2").value="Solar Supply & Installation  ·  Purok 2A, Brgy. Poblacion, Monkayo, Davao de Oro 8805";
+  ws.getCell("A3").value="0962 603 3092  ·  solarays@outlook.ph  ·  facebook.com/SolaRaysDavao";
+  ["A2","A3"].forEach(a=>{ws.getCell(a).font=font({color:{argb:"FFFFFFFF"}});ws.getCell(a).alignment={indent:1,vertical:"middle"}});
+  let r=6;merge(r);ws.getCell("A"+r).value=gsis?"OFFICIAL SOLAR SYSTEM QUOTATION":"SOLAR SYSTEM QUOTATION";ws.getCell("A"+r).font=font({size:16,bold:true});ws.getRow(r).height=22;r++;
+  if(gsis){merge(r);ws.getCell("A"+r).value="For GSIS Ginhawa Solar Energy Loan (GSEL) application";ws.getCell("A"+r).font=font({bold:true,color:{argb:GREEN}});r++}
+  r++;
+  const info=(a,b,c,d,wide)=>{const R=ws.getRow(r);R.getCell(1).value=a;R.getCell(1).font=font({bold:true});
+    if(wide){merge(r,"B","D");R.getCell(2).value=b}else{R.getCell(2).value=b;R.getCell(3).value=c;R.getCell(3).font=font({bold:true});R.getCell(3).alignment={horizontal:"right",indent:1};R.getCell(4).value=d}
+    for(const k of wide?[2,3,4]:[2,4]){R.getCell(k).border={bottom:thin};if(!R.getCell(k).font||!R.getCell(k).font.bold)R.getCell(k).font=font()}
+    R.height=18;r++};
+  const kwhTxt=`${Math.round(kwh).toLocaleString("en-PH")} kWh`,billTxt=peso(bill);
+  info("Quotation No.",q.no,"Date",dmy(q.date));
+  info("Client name",q.name,"Valid until",dmy(validDate));
+  if(gsis){info("Mobile no.",q.phone,"Payment","GSIS Loan (100%)");info("Installation address",q.addr,0,0,true);info("Electric utility",q.du,0,0,true);info("Monthly consumption",kwhTxt,"Latest bill",billTxt)}
+  else{info("Address",q.addr,"Contact no.",q.phone);info("Monthly consumption",kwhTxt,"Monthly bill",billTxt)}
+  r++;
+  const ref=(i,k)=>`'${IC}'!${P[i].S[k]}`;
+  const txtH=(t,w)=>Math.max(21.75,Math.ceil(String(t).length*1.08/w)*13+8);
+  const spansFor=k=>k===1?[["B","D"]]:k===2?[["B","B"],["C","D"]]:[["B","B"],["C","C"],["D","D"]];
+  const chunks=[];for(let i=0;i<n;i+=3)chunks.push(runs.slice(i,i+3).map((x,j)=>({...x,i:i+j})));
+  chunks.forEach((ch,ci)=>{
+    if(ci>0){r++;merge(r);const smaller=ch.every(x=>x.r.contract<Math.min(...chunks[0].map(y=>y.r.contract)));ws.getCell("A"+r).value=smaller?"Smaller systems — lower upfront cost":"More package options";ws.getCell("A"+r).font=font({size:12,bold:true});ws.getRow(r).height=20;r++}
+    const sp=spansFor(ch.length),wChars=ch.length===1?88:ch.length===2?(j=>j?60:30):30;
+    const W=j=>typeof wChars==="function"?wChars(j):wChars;
+    const rowOf=(label,vals,o={})=>{const R=ws.getRow(r);const a=R.getCell(1);a.value=label;a.font=font({bold:true,...(o.labFont||{})});a.fill=fill(o.labFill||SOFT);a.border=box;a.alignment={vertical:"middle",wrapText:true,indent:1};
+      let hmax=o.h||21.75;
+      vals.forEach((v,j)=>{const [s1,s2]=sp[j];if(s1!==s2)ws.mergeCells(`${s1}${r}:${s2}${r}`);const cl=ws.getCell(s1+r);cl.value=v;cl.font=font(o.font||{});if(o.fill)cl.fill=fill(o.fill);cl.alignment={vertical:"middle",horizontal:o.align||"center",wrapText:true};if(o.fmt)cl.numFmt=o.fmt;
+        for(const c of"BCD".slice("BCD".indexOf(s1),"BCD".indexOf(s2)+1))ws.getCell(c+r).border=box;
+        const shown=typeof v==="object"&&v?String(v.result??""):String(v??"");hmax=Math.max(hmax,txtH(shown,W(j)))});
+      R.height=hmax;r++};
+    rowOf(ch.length===1?"Item":"",ch.map(x=>n===1?`${x.label} — ${sysText(x.r)}`:`Package ${x.i+1} — ${x.label}`),{h:30,font:{size:12,bold:true,color:{argb:GOLD}},fill:NAVY,labFill:NAVY,labFont:{color:{argb:GOLD},size:12}});
+    rowOf("System size",ch.map(x=>sysText(x.r)),{font:{bold:true}});
+    rowOf("Savings goal",ch.map(x=>x.r.goalText));
+    rowOf("PV Module",ch.map(x=>pvText(x.r)));
+    rowOf("Inverter",ch.map(x=>invText(x.r)));
+    rowOf("Battery",ch.map(x=>batText(x.r)));
+    rowOf("Accessories",ch.map(()=>"Complete mounting, wiring & safety protection set"));
+    rowOf("Installation",ch.map(()=>n===1?"Included — installation, testing, commissioning and monitoring app setup":"Included"));
+    if(!anyMob)rowOf("Mobilization fee",ch.map(()=>"FREE"),{font:{bold:true,color:{argb:GREEN}}});
+    rowOf("Est. daily harvest",ch.map(x=>({formula:`TEXT(${ref(x.i,"lo")},"0")&" – "&TEXT(${ref(x.i,"hi")},"0")&" kWh/day"`,result:`${Math.round(x.r.kwp*yLo)} – ${Math.round(x.r.kwp*yHi)} kWh/day`})));
+    rowOf("Est. monthly harvest",ch.map(x=>({formula:`TEXT(${ref(x.i,"lo")}*30,"#,##0")&" – "&TEXT(${ref(x.i,"hi")}*30,"#,##0")&" kWh/month"`,result:`${Math.round(x.r.kwp*yLo*30).toLocaleString("en-PH")} – ${Math.round(x.r.kwp*yHi*30).toLocaleString("en-PH")} kWh/month`})));
+    rowOf("Est. monthly savings",ch.map(x=>({formula:`"₱"&TEXT(${ref(x.i,"sav")},"#,##0")&" / month ("&TEXT(${ref(x.i,"off")},"0%")&" of bill)"`,result:`₱${Math.round(x.r.savings).toLocaleString("en-PH")} / month (${Math.round(x.r.offset*100)}% of bill)`})));
+    rowOf(gsis?"Payback period":"Payback period (ROI)",ch.map(x=>({formula:`TEXT(${ref(x.i,"pay")},"0.0")&" years"`,result:`${x.r.payback.toFixed(1)} years`})));
+    rowOf("Est. 10-year savings",ch.map(x=>({formula:`"₱"&TEXT(${ref(x.i,"s10")},"#,##0")&"  (ROI "&TEXT(${ref(x.i,"roi")},"0%")&")"`,result:`₱${Math.round(x.r.cum[10]).toLocaleString("en-PH")}  (ROI ${Math.round(x.r.contract?(x.r.cum[10]-x.r.contract)/x.r.contract*100:0)}%)`})));
+    if(anyMob){
+      rowOf("Package price",ch.map(x=>({formula:`'${IC}'!G${P[x.i].priceR}`,result:x.r.price})),{fmt:PESO,font:{bold:true}});
+      rowOf("Mobilization fee",ch.map(x=>x.r.mobFee?{formula:ref(x.i,"mob"),result:x.r.mobFee}:"FREE"),{fmt:PESO});
+      rowOf("",ch.map(x=>x.r.mobFee?`Covers crew transport, equipment hauling${x.r.lodging?", lodging":""}${x.r.meals?" and meals":""} to ${town} and return`:"No mobilization fee"),{font:{italic:true,size:8.5,color:{argb:"FF777777"}},labFill:"FFFFFFFF"});
+      rowOf("TOTAL CONTRACT PRICE",ch.map(x=>({formula:ref(x.i,"contract"),result:x.r.contract})),{h:31.5,fmt:PESO,fill:GOLD,font:{size:13,bold:true},labFill:GOLD,labFont:{size:11}});
+    }else rowOf("PACKAGE PRICE",ch.map(x=>({formula:ref(x.i,"contract"),result:x.r.contract})),{h:31.5,fmt:PESO,fill:GOLD,font:{size:13,bold:true},labFill:GOLD,labFont:{size:11}});
+  });
+  r++;
+  const sect=t=>{r++;merge(r);band(r,22);const cl=ws.getCell("A"+r);cl.value=t;cl.font=font({size:12,bold:true,color:{argb:"FFFFFFFF"}});cl.alignment={vertical:"middle",indent:1};r++};
+  const para=(a,t,o={})=>{const R=ws.getRow(r);R.getCell(1).value=a;R.getCell(1).font=font({bold:true});R.getCell(1).alignment={vertical:"top",wrapText:true};merge(r,"B","D");const cl=ws.getCell("B"+r);cl.value=t;cl.font=font(o);cl.alignment={vertical:"top",wrapText:true};
+    const len=typeof t==="object"&&t?String(t.result):String(t);R.height=Math.max(21.75,Math.ceil(len*1.1/88)*13+8,Math.ceil(String(a).length/24)*13+8);r++};
+  const utility=q.du||"the electric utility";
+  if(gsis){
+    sect("GSIS Ginhawa Solar Energy Loan (GSEL)");
+    para("Maximum allowable loan","Up to ₱500,000 under the GSEL program · 5% interest per year · payable up to 5 years (60 monthly installments) · no service fee. The actual loanable amount per member is set by GSIS.");
+    para("Client's tentative loan",q.loan?{formula:`"₱"&TEXT('${IC}'!${IN.loan},"#,##0")&" applied loan amount (per GSIS Touch tentative computation)"`,result:`₱${Math.round(q.loan).toLocaleString("en-PH")} applied loan amount (per GSIS Touch tentative computation)`}:"To be confirmed through the client's GSIS Touch tentative computation.");
+    if(q.loan){
+      const parts=runs.map((x,i)=>{const c=ref(i,"contract"),L=`'${IC}'!${IN.loan}`,pre=n>1?`"Package ${i+1}: "&`:"";
+        return {f:`${pre}IF(${c}<=${L},"Within the client's tentative GSIS loan amount (₱"&TEXT(${L}-${c},"#,##0")&" below)","Exceeds the client's tentative loan amount by ₱"&TEXT(${c}-${L},"#,##0"))`,
+          res:(n>1?`Package ${i+1}: `:"")+(x.r.contract<=q.loan?`Within the client's tentative GSIS loan amount (₱${Math.round(q.loan-x.r.contract).toLocaleString("en-PH")} below)`:`Exceeds the client's tentative loan amount by ₱${Math.round(x.r.contract-q.loan).toLocaleString("en-PH")}`)}});
+      para("This quotation vs. loan",{formula:parts.map(p=>p.f).join(`&CHAR(10)&`),result:parts.map(p=>p.res).join("\n")});
+      para("Est. monthly amortization",{formula:`"₱"&TEXT(${ref(0,"amort")},"#,##0")&" / month for 60 months (estimate only; final amount per GSIS loan disclosure)"`,result:`₱${Math.round(q.loan*1.25/60).toLocaleString("en-PH")} / month for 60 months (estimate only; final amount per GSIS loan disclosure)`});
+    }else{
+      const parts=runs.map((x,i)=>({f:`${n>1?`"Package ${i+1}: "&`:""}"₱"&TEXT(${ref(i,"amort")},"#,##0")&" / month"`,res:`${n>1?`Package ${i+1}: `:""}₱${Math.round(x.r.contract*1.25/60).toLocaleString("en-PH")} / month`}));
+      para("Est. monthly amortization",{formula:parts.map(p=>p.f).join(`&"   ·   "&`)+`&" for 60 months if the full price is borrowed (estimate only; final amount per GSIS loan disclosure)"`,result:parts.map(p=>p.res).join("   ·   ")+" for 60 months if the full price is borrowed (estimate only; final amount per GSIS loan disclosure)"});
+    }
+    para("Who may apply","Qualified GSIS pensioners (Pensioner GSEL) and active GSIS members with at least 3 years of government service — subject to GSIS eligibility rules and loan evaluation (existing GSIS loans may be deducted from the loan proceeds).");
+    para("Free GSIS insurance","The financed solar system is insured for 3 years against fire, earthquake, lightning and typhoon at no extra cost, once proof of completed installation is submitted to GSIS.");
+    sect("GSIS Loan and Installation Process");
+    [["Step 1 · Quotation",`SolaRays issues this official quotation based on the client's ${utility} bill. Client signs the Conforme below.`],
+     ["Step 2 · Apply in GSIS Touch","Client files the GSEL application in the GSIS Touch mobile app and uploads this signed quotation and the other documents GSIS requires."],
+     ["Step 3 · GSIS approval","GSIS evaluates and approves the loan. Approved proceeds are released by GSIS directly to the client (member's registered account)."],
+     ["Step 4 · 100% payment","Client pays SolaRays 100% of the Total Contract Price from the loan proceeds. SolaRays issues an official receipt."],
+     ["Step 5 · Immediate mobilization",`Once payment is received, SolaRays immediately confirms stock and mobilizes the installation crew and equipment to the site${town!=="the site"?" in "+town:""}.`],
+     ["Step 6 · Installation & turnover","Installation, testing, commissioning, monitoring app setup and owner orientation — 5–10 working days from mobilization to turnover, depending on weather."],
+     ["Step 7 · Proof to GSIS","SolaRays provides the certificate of completion, official receipt and installation photos. Client submits these to GSIS as proof of completed installation (this activates the free insurance)."],
+     ["Step 8 · Loan repayment","Client repays GSIS through monthly amortization (salary or pension deduction) as set by GSIS."]].forEach(([a,t])=>para(a,t));
+  }
+  /* warranty sentence from the brands actually quoted */
+  const uniq=a=>[...new Map(a.filter(Boolean).map(x=>[x[0],x])).values()];
+  const pvW=uniq(runs.map(x=>x.r.pv&&x.r.pv.wy?[brandOf(x.r.pv.s),x.r.pv.wy]:null));
+  const invW=uniq(runs.map(x=>x.r.inv&&x.r.inv.wy?[brandOf(x.r.inv.s),x.r.inv.wy]:null));
+  const batW=uniq(runs.map(x=>x.r.bat&&x.r.bat.wy?[brandOf(x.r.bat.s),x.r.bat.wy]:null));
+  const yrs=(list,unit)=>list.map(([b,y])=>`${b} ${y} years`).join("; ");
+  const warranty=`PV modules: ${pvW.length?"manufacturer product warranty ("+pvW.map(([b,y])=>`${b} up to ${y} years`).join("; ")+")":"manufacturer product warranty"}. Inverter: ${invW.length?yrs(invW):"manufacturer warranty"}.${batW.length?" Batteries: "+yrs(batW)+".":""} Workmanship/installation warranty: 1 year from turnover. Warranty does not cover damage from misuse, unauthorized repairs, flooding, fire, lightning or other force majeure.`;
+  const tile=runs.some(x=>/tile/i.test(x.r.c.roof));
+  const excl=`Roof repair or structural reinforcement, PV cable runs beyond 30 meters,${tile?"":" tile-roof mounting hardware,"} and net-metering application fees${q.du?" with "+q.du:""} (assistance available on request).`;
+  const est=`Savings, payback and ROI use the latest bill (${kwhTxt}, ${billTxt}) at current rates, with ${num(C.escalate)?num(C.escalate)+"% yearly rate increase":"no rate increase"} assumed and savings capped at ${num(C.maxOffset)}% for fixed charges and cloudy days. Harvest figures are estimates; actual output varies with weather, shading and panel orientation.`;
+  sect("Terms, Warranty and Disclaimer");
+  if(gsis){
+    para("Payment terms","100% of the Total Contract Price, paid by the client from the GSIS loan proceeds once released. No downpayment is required before GSIS approval. Mobilization starts immediately after payment is received.");
+    para("Warranty",warranty);
+    para("Installation period","5–10 working days from mobilization until turnover, starting once payment is received and stock is confirmed. Actual days depend on weather (rain and typhoon days are not counted), roof type and condition, and site access; roof work stops during rain for safety.");
+    para("Sizing basis",`The system size and quoted price are based on the client's consumption of ${kwhTxt} per month. Additional loads added in the future (e.g., more air-conditioners, freezers, water heaters or equipment) will raise consumption and lower the percentage of savings; the system can be expanded with more panels or battery at additional cost.`);
+    para("Inclusions",`Site assessment, supply and delivery of all listed equipment${town!=="the site"?" to "+town:""}, mounting and wiring, grounding and surge protection, testing and commissioning, monitoring app setup, owner orientation, and completion documents for GSIS.`);
+    para("Exclusions",excl);
+    para("Estimates",est+" GSIS loan terms are as published by GSIS and may change; GSIS decides final approval, loan amount and amortization.");
+    para("Validity",`This quotation is valid for ${q.valid} days from the quotation date to allow for GSIS processing. If loan release goes beyond this date, SolaRays will reconfirm equipment prices and stock before mobilization.`);
+  }else{
+    para("Warranty",warranty);
+    para("Installation period","5–10 working days after downpayment and stock confirmation. Actual days depend on system size, roof type and condition, site access, and weather; roof work stops during rain for safety.");
+    para("Inclusions","Free site inspection, supply and delivery of all listed equipment, mounting and wiring, grounding and surge protection, testing and commissioning, monitoring app setup, and owner orientation.");
+    para("Exclusions",excl);
+    para("Payment terms","Cash or GSIS Solar Loan (government employees). Cash: 50% downpayment upon acceptance of the agreement; remaining 50% upon completion, testing and turnover.");
+    para("Estimates",est+` Prices are valid for ${q.valid} days from the quotation date.`);
+  }
+  r+=2;
+  const sig=ws.getRow(r);sig.getCell(1).value="Conforme:";sig.getCell(1).font=font({bold:true});sig.getCell(2).value="______________________________";sig.getCell(3).value="Prepared by:";sig.getCell(3).font=font({bold:true});sig.getCell(3).alignment={horizontal:"right",indent:1};sig.getCell(4).value="______________________________";
+  r++;ws.getCell("B"+r).value=q.name||"";ws.getCell("B"+r).font=font({bold:true});ws.getCell("D"+r).value="Raymund Reyes";ws.getCell("D"+r).font=font({bold:true});
+  r++;ws.getCell("B"+r).value="Client signature over printed name / Date";ws.getCell("B"+r).font=font({size:8.5,color:{argb:"FF777777"}});ws.getCell("D"+r).value="General Manager, SolaRays";ws.getCell("D"+r).font=font({size:8.5,color:{argb:"FF777777"}});
+  r+=2;merge(r);band(r,20,GOLD);ws.getCell("A"+r).value="SolaRays  ·  0962 603 3092  ·  solarays@outlook.ph  ·  Free consultation  ·  GSIS loan accepted";ws.getCell("A"+r).font=font({bold:true,size:9});ws.getCell("A"+r).alignment={horizontal:"center",vertical:"middle"};
+  ws.pageSetup={orientation:"portrait",paperSize:9,fitToPage:true,fitToWidth:1,fitToHeight:!gsis&&n<=3?1:0,printArea:`A1:D${r}`,horizontalCentered:true,margins:{left:0.4,right:0.4,top:0.4,bottom:0.4,header:0.2,footer:0.2}};
+  const buf=await wb.xlsx.writeBuffer();
+  return new Blob([buf],{type:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"});
+}
+
+/* calculator events */
+const PK_NAMES=["Premium","Standard","Value","Starter","Basic","Option 6"];
+const C_RERENDER=new Set(["mode","goal","priceBy","payment","sunPreset","client","histBasis","panel","inverter","battery","mobMode"]);
+const pkCfg=()=>{const o={};CALC_KEYS_EQUIP.forEach(k=>o[k]=C[k]);return o};
+document.addEventListener("input",e=>{
+  const el=e.target;if(!el.closest||!el.closest("#main"))return;
+  if(el.dataset.c2h!==undefined){C.hist[+el.dataset.c2h]=el.value;calcRefresh();return}
+  if(el.dataset.pkname!==undefined){const p=PKGS[+el.dataset.pkname];if(p){p.label=el.value;saveCalc()}return}
+  const k=el.dataset.c2;if(!k||el.tagName==="SELECT")return;
+  C[k]=el.value;
+  if(k==="dayShare"){const w=el.closest(".c2day");w.style.setProperty("--d",el.value+"%");w.querySelector(".dl").textContent=`Day ${el.value}%`;w.querySelector(".nl").textContent=`Night ${100-el.value}%`;const h=w.parentElement.querySelector(".c2h");if(h)h.textContent=`day ${el.value}% · night ${100-el.value}%`}
+  if(k==="psh")C.sunPreset=(SUN_PRESETS.find(p=>p[1]===num(el.value))||["Custom"])[0];
+  calcRefresh();
+});
+document.addEventListener("change",e=>{
+  const el=e.target;if(el.tagName!=="SELECT"||!el.dataset.c2||!el.closest("#main"))return;
+  const k=el.dataset.c2;
+  if(k==="client"){applyClient(el.value);C.editing=null;render();return}
+  C[k]=el.value;
+  if(k==="sunPreset"){const p=SUN_PRESETS.find(x=>x[0]===el.value);if(p&&p[1])C.psh=p[1]}
+  if(k==="panel")C.panelQty="";if(k==="battery")C.batQty="";
+  saveCalc();if(C_RERENDER.has(k))render();else calcRefresh();
+});
+document.addEventListener("click",e=>{
+  const t=e.target.closest("[data-c2view],[data-c2lt],[data-c2ct],[data-c2seg],[data-c2act],[data-pksel],[data-pkedit],[data-pkup],[data-pkrm]");if(!t||!t.closest("#main"))return;
+  const d=t.dataset;
+  if(d.c2view){C.view=d.c2view;saveCalc();render();return}
+  if(d.c2lt){C.lt=d.c2lt;saveCalc();render();return}
+  if(d.c2ct){C.ct=d.c2ct;saveCalc();render();return}
+  if(d.c2seg){C[d.c2seg]=d.v;saveCalc();render();return}
+  if(d.pksel){const p=PKGS[+d.pksel];p.sel=p.sel===false;saveCalc();render();return}
+  if(d.pkedit){const i=+d.pkedit,p=PKGS[i];Object.assign(C,p.cfg);C.editing=i;C.view="size";C.lt="equip";saveCalc();render();toast(`Editing ${p.label}. Tap Update package when done.`);return}
+  if(d.pkup){const i=+d.pkup;if(i>0){[PKGS[i-1],PKGS[i]]=[PKGS[i],PKGS[i-1]];saveCalc();render()}return}
+  if(d.pkrm){const i=+d.pkrm;PKGS.splice(i,1);if(C.editing===i)C.editing=null;saveCalc();render();return}
+  const a=d.c2act;
+  if(a==="pkadd"){if(PKGS.length>=6){toast("Up to 6 packages");return}const used=new Set(PKGS.map(p=>p.label));PKGS.push({label:PK_NAMES.find(x=>!used.has(x))||"Package "+(PKGS.length+1),cfg:pkCfg(),sel:true});saveCalc();if(C.view!=="pkg")toast(`Added as package ${PKGS.length}`);render();return}
+  if(a==="pkupdate"){const p=PKGS[C.editing];if(p){p.cfg=pkCfg();toast(p.label+" updated")}C.editing=null;C.view="pkg";saveCalc();render();return}
+  if(a==="pkcancel"){C.editing=null;saveCalc();render();return}
+  if(a==="suggest"){if(PKGS.length&&!confirmReplace())return;suggestPackages();C.view="pkg";render();return}
+  if(a==="items"){showItems();return}
+  if(a==="saveclient"){saveCalcToClient();return}
+  if(a==="quote"){openQuote();return}
+});
+let pkConfirmT=0;
+function confirmReplace(){const now=Date.now();if(now-pkConfirmT<4000)return true;pkConfirmT=now;toast("Tap Suggest again to replace your packages");return false}
 
 /* ---------- events ---------- */
 document.addEventListener("click",async e=>{
@@ -1066,12 +1718,12 @@ const lockedNow=()=>document.documentElement.classList.contains("lock")&&matchMe
 ["gesturestart","gesturechange"].forEach(t=>document.addEventListener(t,e=>{if(lockedNow()&&!e.target.closest(".sheet,.viewer"))e.preventDefault()},{passive:false}));
 document.addEventListener("touchmove",e=>{if(e.touches&&e.touches.length>1&&lockedNow())e.preventDefault()},{passive:false});
 window.addEventListener("wheel",e=>{if(e.ctrlKey&&lockedNow())e.preventDefault()},{passive:false});
-let resizeT;window.addEventListener("resize",()=>{clearTimeout(resizeT);resizeT=setTimeout(()=>{if(state.view==="home")drawCharts(false)},150)});
+let resizeT;window.addEventListener("resize",()=>{clearTimeout(resizeT);resizeT=setTimeout(()=>{if(state.view==="home"||state.view==="calc")drawCharts(false)},150)});
 $("#refreshBtn").onclick=()=>{state.sheetIds={};loadAll()};
 $("#settingsBtn").onclick=()=>{state.view="settings";render()};
 
 /* ---------- boot ---------- */
-try{const s=JSON.parse(lsGet("solarays.calc")||"null");if(s)Object.assign(calcIn,s)}catch(e){}
+loadCalc();
 {const p=lsGet("solarays.period");if(["30","12","all"].includes(p))state.period=p;if(lsGet("solarays.pview")==="board")state.pview="board"}
 state.cal.sel=today();state.cal.month=today().slice(0,7);try{const h=JSON.parse(lsGet("solarays.calHidden")||"[]");if(Array.isArray(h))state.cal.hidden=h}catch(e){}
 const sv=lsGet("solarays.view");if(sv&&VIEWS.some(x=>x[0]===sv))state.view=sv;
