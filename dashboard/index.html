@@ -12,7 +12,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2316212E'/%3E%3Ccircle cx='32' cy='32' r='13' fill='%23FFB612'/%3E%3C/svg%3E">
 <title>SolaRays Dashboard</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
-<link rel="stylesheet" href="style.css?v=2026-10-24-3">
+<link rel="stylesheet" href="style.css?v=2026-10-24-4">
 </head>
 <body>
 
@@ -39,11 +39,12 @@ const ICONS={
   home:'<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   clients:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5c1.9.6 3.1 2.4 3.5 5.5"/>',
   projects:'<path d="M3 9h18l-2 11H5z"/><path d="M3 9l3-5h12l3 5M9 13h6"/>',
+  calendar:'<rect x="3.5" y="5" width="17" height="15.5" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4M8 14h2M14 14h2M8 17h2"/>',
   suppliers:'<rect x="3" y="7" width="13" height="11" rx="1"/><path d="M16 11h3l2 3v4h-5"/><circle cx="7" cy="19" r="1.8"/><circle cx="18" cy="19" r="1.8"/>',
   calc:'<rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8 6.5h8v3H8zM8.5 13h.01M12 13h.01M15.5 13h.01M8.5 17h.01M12 17h.01M15.5 17h.01"/>'
 };
 const ico=k=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
-const VIEWS=[["home","Dashboard"],["clients","Clients"],["projects","Projects"],["suppliers","Suppliers"],["calc","Calculator"]];
+const VIEWS=[["home","Dashboard"],["clients","Clients"],["projects","Projects"],["calendar","Calendar"],["suppliers","Suppliers"],["calc","Calculator"]];
 
 /* Each section maps to a tab of the Google Sheet. Field keys are the sheet's column headers, exactly as written there. */
 const TABS={
@@ -55,20 +56,26 @@ const TABS={
   ["kWh","Monthly kWh","number"],["Amount","Monthly bill (₱)","number"],["Rate per kWh","Rate per kWh (₱)","number"],
   ["Consulted (Y/N)","Consulted","select",["Yes","No"]],["Consultation Date","Consultation date","date"],["Notes","Notes","textarea"],["Photos","Photos","photos"]]},
  Projects:{sheet:"Projects",key:"projects",title:"Project",idField:"ID",idMode:"prefix",prefix:"PR",filterField:"Status",fields:[
-  ["ID","ID","hidden"],["Client","Client","client"],["System (kWp)","System (kWp)","number"],["Panels","Panels","text"],
+  ["ID","ID","hidden"],["Client No.","Client No.","hidden"],["Client","Client","clientpick"],["System (kWp)","System (kWp)","number"],["Panels","Panels","text"],
   ["Inverter","Inverter","text"],["Battery","Battery","text"],["Contract Price","Contract price (₱)","number"],["Contract Date","Contract date","date"],
   ["Payment","Payment","select",["Cash","GSIS loan"]],["Amount Received","Amount received (₱)","number"],
   ["Status","Status","select",["Downpayment","Ordering","Scheduled","Installing","Awaiting loan release","Completed"]],
   ["Start Date","Start date","date"],["Completion Date","Completion date","date"],["Notes","Notes","textarea"],["Photos","Photos","photos"]]},
  Suppliers:{sheet:"Suppliers",key:"suppliers",title:"Supplier item",idField:null,filterField:"Item",filterOpts:["PV Module","Inverter","Battery","Accessories"],fields:[
   ["Supplier","Supplier","text"],["Item","Category","select",["PV Module","Inverter","Battery","Accessories"]],
-  ["Brand","Brand","text"],["Specs / Description","Specs / description","textarea"],["SRP","Price (₱)","number"],["Photos","Photos","photos"]]}
+  ["Brand","Brand","text"],["Specs / Description","Specs / description","textarea"],["SRP","Price (₱)","number"],["Photos","Photos","photos"]]},
+ Calendar:{sheet:"Calendar",key:"calendar",title:"Event",idField:"ID",idMode:"prefix",prefix:"EV",filterField:"Type",filterOpts:[],fields:[
+  ["ID","ID","hidden"],["Title","Title","text"],["Type","Type","select",[]],["Status","Status","select",["Scheduled","Done","Cancelled"]],
+  ["Date","Date","date"],["Start Time","Start time","time"],["End Time","End time","time"],
+  ["Client No.","Client No.","hidden"],["Client","Client","clientpick"],["Project","Project","projpick"],
+  ["Location","Location","text"],["Notes","Notes","textarea"],["Created","Created","hidden"]]}
 };
 Object.values(TABS).forEach(t=>{if(!t.filterOpts)t.filterOpts=t.fields.find(f=>f[0]===t.filterField)[3]});
+queueMicrotask(()=>{TABS.Calendar.fields.find(f=>f[0]==="Type")[3]=EVENT_TYPES.map(x=>x[0])});
 
-const state={view:"home",sheetId:null,data:{Clients:[],Projects:[],Suppliers:[]},heads:{},loaded:false,
+const state={view:"home",sheetId:null,data:{Clients:[],Projects:[],Suppliers:[],Calendar:[]},heads:{},loaded:false,
   filter:{clients:"All",projects:"All",suppliers:"All"},q:{clients:"",projects:"",suppliers:""},
-  error:null,sheetIds:{},period:"12"};
+  error:null,sheetIds:{},period:"12",cal:{month:"",sel:"",hidden:[]}};
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -104,6 +111,7 @@ function errMsg(e){
   if(c==="bad_response")return "The Web app URL didn't answer like the SolaRays script. Copy the Web app URL that ends in /exec, and check that access is set to Anyone.";
   if(c==="bad_row")return (e.message||"That row no longer exists.")+" Tap Try again to reload.";
   if(c==="setup")return "Add your Web app URL and access key under Database.";
+  if(c==="bad_sheet")return "Your Apps Script is an older version that doesn't know the Calendar tab. Paste the new Code.gs and deploy a new version.";
   return (e&&e.message)||"Something went wrong talking to Google Sheets. Tap Try again.";
 }
 async function api(body){
@@ -184,11 +192,11 @@ function render(){
   if(state.view==="settings"){document.documentElement.classList.remove("lock");m.className="";m.innerHTML=settingsView();bindSettings();return}
   const banner=state.error?`<div class="banner"><span>${esc(errMsg(state.error))}</span><span class="row"><button class="btn ghost" type="button" data-act="refresh">Try again</button></span></div>`:"";
   const loading=!state.loaded&&!state.error?`<div class="empty" style="margin-bottom:16px">Loading your Google Sheet…</div>`:"";
-  const v={home:homeView,clients:()=>listView("Clients"),projects:()=>listView("Projects"),suppliers:()=>listView("Suppliers"),calc:calcView}[state.view];
+  const v={home:homeView,clients:()=>listView("Clients"),projects:()=>listView("Projects"),suppliers:()=>listView("Suppliers"),calc:calcView,calendar:calendarView}[state.view];
   CHARTS={};chartSeq=0;
-  const fixed=state.view==="home"||state.view==="calc";
+  const fixed=state.view==="home"||state.view==="calc"||state.view==="calendar";
   document.documentElement.classList.toggle("lock",fixed);
-  m.className=state.view==="home"?"full":state.view==="calc"?"full calcfull":"";
+  m.className=state.view==="home"?"full":state.view==="calc"?"full calcfull":state.view==="calendar"?"full calfull":"";
   m.innerHTML=banner+loading+v();
   if(state.view==="calc")bindCalc();
   if(state.view==="home")requestAnimationFrame(drawCharts);
@@ -219,6 +227,77 @@ function bindSettings(){
     try{await api({action:"read",tabs:{}});lsSet("solarays.api",url);lsSet("solarays.key",key);state.view="home";toast("Connected to Google Sheets");await loadAll()}
     catch(e){Object.assign(cfg,prev);$("#setupErr").textContent=errMsg(e);$("#connectBtn").disabled=false;$("#connectBtn").textContent="Connect"}
   };
+}
+
+/* ---------- links between clients, projects and events ---------- */
+const clientByNo=no=>no===""||no==null?null:state.data.Clients.find(c=>String(c["S.N."]).trim()===String(no).trim())||null;
+const clientFor=r=>clientByNo(r["Client No."])||(r.Client?state.data.Clients.find(c=>String(c.Client).trim().toLowerCase()===String(r.Client).trim().toLowerCase()):null)||null;
+const projectsFor=c=>state.data.Projects.filter(p=>clientFor(p)===c);
+const projectById=id=>state.data.Projects.find(p=>String(p.ID)===String(id))||null;
+
+/* ---------- calendar ---------- */
+const EVENT_TYPES=[
+  ["Installation","#FFB612"],["Site visit / Consultation","#6CB4FF"],["Client meeting","#4FD18B"],["Contract signing","#B9A6FF"],
+  ["Payment collection","#FF7A59"],["Supplier pickup / Delivery","#3DD6C6"],["Follow-up call","#F59AD8"],["Maintenance / After-sales","#C9A66B"],["Other","#8FA1B7"]];
+const typeColor=t=>(EVENT_TYPES.find(x=>x[0]===t)||EVENT_TYPES[EVENT_TYPES.length-1])[1];
+function parseTime(s){
+  s=String(s||"").trim();if(!s)return "";
+  const m=s.match(/^(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*([AaPp][Mm])?$/);if(!m)return "";
+  let h=+m[1];const mi=m[2]||"00",ap=(m[3]||"").toLowerCase();
+  if(ap==="pm"&&h<12)h+=12;if(ap==="am"&&h===12)h=0;if(h>23)return "";
+  return pad(h)+":"+mi;
+}
+const fmtTime=t=>{if(!t)return "";let [h,m]=t.split(":").map(Number);const ap=h>=12?"PM":"AM";h=h%12||12;return `${h}:${pad(m)} ${ap}`};
+function allEvents(){
+  const ev=[];
+  state.data.Calendar.forEach(e=>{const iso=toISO(e.Date);if(!iso)return;const c=clientFor(e);
+    ev.push({iso,start:parseTime(e["Start Time"]),end:parseTime(e["End Time"]),type:e.Type||"Other",title:e.Title||((e.Type||"Event")+(e.Client?": "+e.Client:"")),client:e.Client||"",clientRef:c,loc:e.Location||(c&&c.Address)||"",status:e.Status||"Scheduled",src:"Calendar",row:e._row})});
+  const has=(iso,type,c)=>ev.some(x=>x.src==="Calendar"&&x.iso===iso&&x.type===type&&c&&x.clientRef===c);
+  state.data.Projects.forEach(p=>{const iso=toISO(p["Start Date"]);if(!iso)return;const c=clientFor(p);if(has(iso,"Installation",c))return;
+    ev.push({iso,start:"",end:"",type:"Installation",title:"Installation: "+(p.Client||"Project"),client:p.Client||"",clientRef:c,loc:(c&&c.Address)||"",status:p.Status==="Completed"?"Done":"Scheduled",src:"Projects",row:p._row,auto:true})});
+  state.data.Clients.forEach(c=>{const iso=toISO(c["Consultation Date"]);if(!iso)return;if(has(iso,"Site visit / Consultation",c))return;
+    ev.push({iso,start:"",end:"",type:"Site visit / Consultation",title:"Consultation: "+(c.Client||"Client"),client:c.Client||"",clientRef:c,loc:c.Address||"",status:c["Consulted (Y/N)"]==="Yes"?"Done":"Scheduled",src:"Clients",row:c._row,auto:true})});
+  return ev.sort((a,b)=>a.iso.localeCompare(b.iso)||(a.start||"99").localeCompare(b.start||"99"));
+}
+function evButton(e,compact){
+  const col=typeColor(e.type);
+  if(compact)return `<button type="button" class="chipev ${e.status==="Cancelled"?"cx":""}" data-edit="${e.src}" data-row="${e.row}" style="--c:${col}" title="${esc(e.title)}">${e.start?`<b>${esc(fmtTime(e.start).replace(":00","").replace(" ",""))}</b> `:""}${esc(e.title)}</button>`;
+  const when=e.start?fmtTime(e.start)+(e.end?" – "+fmtTime(e.end):""):"All day";
+  return `<button type="button" class="evrow ${e.status==="Cancelled"?"cx":""}" data-edit="${e.src}" data-row="${e.row}" style="--c:${col}"><span class="evbar"></span><span class="evt">${esc(when)}</span><span class="evm"><b>${esc(e.title)}</b><span>${esc([e.type,e.loc?String(e.loc).split(",").slice(0,2).join(","):""].filter(Boolean).join(" · "))}</span></span>${e.status!=="Scheduled"?pill(e.status):e.auto?`<span class="pill">From ${e.src==="Projects"?"project":"client"}</span>`:""}</button>`;
+}
+function calendarView(){
+  const cal=state.cal;const t=today();
+  const [Y,M]=cal.month.split("-").map(Number);
+  const first=new Date(Y,M-1,1),days=new Date(Y,M,0).getDate(),lead=first.getDay();
+  const rows=Math.ceil((lead+days)/7);
+  const all=allEvents().filter(e=>!cal.hidden.includes(e.type));
+  const byDay={};all.forEach(e=>(byDay[e.iso]=byDay[e.iso]||[]).push(e));
+  let cells="";
+  for(let i=0;i<rows*7;i++){
+    const d=new Date(Y,M-1,1-lead+i),iso=isoOf(d),out=d.getMonth()!==M-1,list=byDay[iso]||[];
+    const shown=list.slice(0,3),more=list.length-shown.length;
+    cells+=`<div class="day${out?" out":""}${iso===t?" today":""}${iso===cal.sel?" sel":""}" role="gridcell" tabindex="0" data-cal-day="${iso}" aria-label="${esc(fmtDate(iso))}, ${list.length} event${list.length===1?"":"s"}"><span class="dn">${d.getDate()}</span><div class="evs">${shown.map(e=>evButton(e,true)).join("")}${more>0?`<span class="more">+${more} more</span>`:""}</div><div class="dots">${list.slice(0,4).map(e=>`<i style="background:${typeColor(e.type)}"></i>`).join("")}</div></div>`;
+  }
+  const selList=byDay[cal.sel]||[];
+  const upcoming=all.filter(e=>e.iso>cal.sel&&e.iso>=t&&e.status!=="Cancelled").slice(0,8);
+  const monthName=first.toLocaleDateString("en-PH",{month:"long",year:"numeric"});
+  const selName=new Date(+cal.sel.slice(0,4),+cal.sel.slice(5,7)-1,+cal.sel.slice(8,10)).toLocaleDateString("en-PH",{weekday:"long",month:"long",day:"numeric"});
+  const monthEvents=all.filter(e=>e.iso.slice(0,7)===cal.month);
+  const counts=EVENT_TYPES.map(([n])=>monthEvents.filter(e=>e.type===n).length);
+  return `<div class="top calhead"><div><h1>Calendar</h1><div class="sub">${monthEvents.length} event${monthEvents.length===1?"":"s"} in ${esc(monthName)}</div></div>
+    <div class="row"><div class="mnav"><button type="button" class="btn ghost icon" data-cal-nav="-1" aria-label="Previous month">‹</button><b>${esc(monthName)}</b><button type="button" class="btn ghost icon" data-cal-nav="1" aria-label="Next month">›</button></div>
+    <button type="button" class="btn ghost" data-cal-nav="0">Today</button><button type="button" class="btn" data-new="Calendar" data-date="${cal.sel}">+ Add event</button></div></div>
+  <div class="tfilter">${EVENT_TYPES.map(([n,c],i)=>`<button type="button" class="chip tchip" data-cal-type="${esc(n)}" aria-pressed="${!cal.hidden.includes(n)}" style="--c:${c}"><i></i>${esc(n)}${counts[i]?` <span>${counts[i]}</span>`:""}</button>`).join("")}</div>
+  <div class="calwrap">
+    <section class="card month"><div class="wk">${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>`<span>${d}</span>`).join("")}</div><div class="mgrid" role="grid" style="--rows:${rows}">${cells}</div></section>
+    <section class="card agenda"><div class="ch"><h2>${esc(selName)}</h2><span>${selList.length} event${selList.length===1?"":"s"}</span></div>
+      <div class="agscroll">
+        <div class="evlist">${selList.length?selList.map(e=>evButton(e)).join(""):`<div class="empty">Nothing scheduled.</div>`}</div>
+        <button type="button" class="btn ghost wide" data-new="Calendar" data-date="${cal.sel}">+ Add event on ${esc(fmtDate(cal.sel).replace(/, \d{4}$/,""))}</button>
+        <h3 class="agh">Coming up</h3>
+        <div class="evlist">${upcoming.length?upcoming.map(e=>`<div class="update">${esc(fmtDate(e.iso).replace(/, \d{4}$/,""))}</div>${evButton(e)}`).join(""):`<div class="empty">No upcoming events.</div>`}</div>
+      </div></section>
+  </div>`;
 }
 
 /* ---------- dashboard home: charts ---------- */
@@ -357,10 +436,10 @@ function homeView(){
   const townsHTML=towns.length?`<div class="cbody hbars">${towns.map(([n,v],i)=>`<div class="hb"><span>${esc(n)}</span><div><i style="width:${(v/tmax*100).toFixed(0)}%;background:${i?COL.blue:COL.sol}"></i></div><b>${v}</b></div>`).join("")}</div>`:`<div class="cbody"><div class="empty">Add addresses like "Poblacion, Monkayo, Davao de Oro" and towns show here.</div></div>`;
 
   const stages=[["Downpayment",COL.coral],["Ordering",COL.lav],["Scheduled",COL.blue],["Installing",COL.sol],["Awaiting loan release",COL.green]].map(([n,c])=>[n,active.filter(p=>p.Status===n).length,c]);
-  const next=active.filter(p=>toISO(p["Start Date"])>=t).sort((a,b)=>toISO(a["Start Date"]).localeCompare(toISO(b["Start Date"])))[0];
+  const next=allEvents().find(e=>e.type==="Installation"&&e.iso>=t&&e.status==="Scheduled");
   const pipeHTML=`<div class="cbody pipe2"><div class="stackbar">${active.length?stages.filter(s=>s[1]).map(([n,v,c])=>`<i style="flex:${v};background:${c}" title="${n}: ${v}"></i>`).join(""):'<i style="flex:1;background:#26374B"></i>'}</div>
     <div class="slist">${stages.map(([n,v,c])=>`<div class="lg"><i style="background:${c}"></i><span>${n==="Awaiting loan release"?"Loan release":n}</span><b>${v}</b></div>`).join("")}</div>
-    <button type="button" class="nextbox" ${next?`data-edit="Projects" data-row="${next._row}"`:'data-view="projects"'}><span>Next install</span><b>${next?esc(next.Client||"Project")+" · "+fmtDate(next["Start Date"]).replace(/, \d{4}$/,""):"None scheduled"}</b></button></div>`;
+    <button type="button" class="nextbox" ${next?`data-edit="${next.src}" data-row="${next.row}"`:'data-view="calendar"'}><span>Next install</span><b>${next?esc(next.client||next.title)+" · "+fmtDate(next.iso).replace(/, \d{4}$/,""):"None scheduled"}</b></button></div>`;
 
   const hr=new Date().getHours();const greet=hr<12?"Good morning":hr<18?"Good afternoon":"Good evening";
   const date=new Date().toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"});
@@ -391,8 +470,8 @@ function homeView(){
 
 function itemHTML(name,r){
   let t="",d="",right="";
-  if(name==="Clients"){t=r.Client||"Unnamed";d=[r.Address,r.Phone,r.DU,r.kWh?num(r.kWh)+" kWh/mo":""].filter(Boolean).join(" · ");right=pill(r["Consulted (Y/N)"]==="Yes"?"Consulted":"")+(r.Amount?`<span class="amt">${peso(r.Amount)}/mo</span>`:"")+(r.Type?`<span class="sub">${esc(r.Type)}</span>`:"")}
-  if(name==="Projects"){const bal=num(r["Contract Price"])-num(r["Amount Received"]);t=r.Client||"No client";d=[r["System (kWp)"]?r["System (kWp)"]+" kWp":"",r.Inverter,r.Payment].filter(Boolean).join(" · ");right=pill(r.Status)+`<span class="amt">${peso(r["Contract Price"])}</span>${bal>0?`<span class="sub">Bal ${peso(bal)}</span>`:""}`}
+  if(name==="Clients"){t=r.Client||"Unnamed";d=[r.Address,r.Phone,r.DU,r.kWh?num(r.kWh)+" kWh/mo":""].filter(Boolean).join(" · ");const pj=projectsFor(r);right=(pj.length?`<span class="pill warn">Project · ${esc(pj[pj.length-1].Status||"Open")}</span>`:pill(r["Consulted (Y/N)"]==="Yes"?"Consulted":""))+(r.Amount?`<span class="amt">${peso(r.Amount)}/mo</span>`:"")+(r.Type?`<span class="sub">${esc(r.Type)}</span>`:"")}
+  if(name==="Projects"){const bal=num(r["Contract Price"])-num(r["Amount Received"]);const cl=clientFor(r);t=(cl&&cl.Client)||r.Client||"No client";d=[cl?townOf(cl):"",r["System (kWp)"]?r["System (kWp)"]+" kWp":"",r.Inverter,r.Payment].filter(Boolean).join(" · ");right=pill(r.Status)+`<span class="amt">${peso(r["Contract Price"])}</span>${bal>0?`<span class="sub">Bal ${peso(bal)}</span>`:""}`}
   if(name==="Suppliers"){t=[r.Brand&&r.Brand!=="-"?r.Brand:"",String(r["Specs / Description"]).split(",")[0]].filter(Boolean).join(" · ")||"Item";d=[r.Supplier,r["Specs / Description"]].filter(Boolean).join(" · ");right=`<span class="amt">${peso(r.SRP)}</span><span class="pill">${esc(r.Item)}</span>`}
   const pc=photoIds(r.Photos).length;
   return `<button type="button" class="item" data-edit="${name}" data-row="${r._row}"><div class="m"><div class="t">${esc(t)}</div><div class="d">${esc(d)}</div></div>${pc?`<span class="pcount" title="${pc} photo${pc>1?"s":""}">${CAM}${pc}</span>`:""}<div class="r">${right}</div></button>`;
@@ -453,6 +532,7 @@ function openForm(name,rec,prefill){
     if(t.idMode==="prefix")r[t.idField]=t.prefix+"-"+Date.now().toString(36).toUpperCase();
     if(name==="Clients"){r["Consulted (Y/N)"]=r["Consulted (Y/N)"]||"No"}
     if(name==="Projects"){r.Status=r.Status||"Downpayment";r["Contract Date"]=r["Contract Date"]||today()}
+    if(name==="Calendar"){r.Status=r.Status||"Scheduled";r.Date=r.Date||state.cal.sel||today();r.Type=r.Type||"Site visit / Consultation";r.Created=sheetDate(today())}
   }
   const ph={ids:photoIds(r.Photos),added:[],removed:[],busy:0};
   const clients=state.data.Clients.map(c=>c.Client).filter(Boolean).sort();
@@ -464,19 +544,53 @@ function openForm(name,rec,prefill){
     if(type==="select"){const list=raw&&!opts.includes(raw)?[...opts,raw]:opts;return `<div class="f"><label for="${id}">${label}</label><select id="${id}" data-k="${esc(key)}"><option value=""></option>${list.map(o=>`<option ${raw===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>`}
     if(type==="client")return `<div class="f"><label for="${id}">${label}</label><input id="${id}" data-k="${esc(key)}" list="clientList" value="${esc(raw)}" autocomplete="off"><datalist id="clientList">${clients.map(c=>`<option value="${esc(c)}"></option>`).join("")}</datalist></div>`;
     if(type==="date")return `<div class="f"><label for="${id}">${label}</label><input id="${id}" data-k="${esc(key)}" type="date" value="${esc(toISO(raw))}"></div>`;
+    if(type==="time")return `<div class="f"><label for="${id}">${label}</label><input id="${id}" data-k="${esc(key)}" type="time" step="300" value="${esc(parseTime(raw))}"></div>`;
+    if(type==="clientpick"){
+      const cur=clientFor(r);const list=[...state.data.Clients].sort((a,b)=>String(a.Client).localeCompare(String(b.Client)));
+      const opt=c=>`<option value="${esc(c["S.N."])}" data-name="${esc(c.Client)}" ${c===cur?"selected":""}>${esc(c.Client)}${c["S.N."]?" · No. "+esc(c["S.N."]):""}</option>`;
+      const orphan=!cur&&r.Client?`<option value="" data-name="${esc(r.Client)}" selected>${esc(r.Client)} (not in client list)</option>`:"";
+      return `<div class="f full"><label for="${id}">${label}${name==="Projects"?"":' <span class="hint">Optional</span>'}</label><select id="${id}" data-k="Client No." data-name-target="Client"><option value="" data-name="">${name==="Projects"?"Choose a client…":"No client"}</option>${orphan}${list.map(opt).join("")}</select><div class="clientcard" id="clientCard"></div></div>`;
+    }
+    if(type==="projpick"){
+      const list=state.data.Projects.filter(p=>p.ID);
+      return `<div class="f"><label for="${id}">${label} <span class="hint">Optional</span></label><select id="${id}" data-k="Project"><option value="">None</option>${list.map(p=>`<option value="${esc(p.ID)}" ${String(raw)===String(p.ID)?"selected":""}>${esc(p.Client||p.ID)} · ${esc(p["System (kWp)"]?p["System (kWp)"]+" kWp":p.ID)}</option>`).join("")}</select></div>`;
+    }
     const v=type==="number"&&raw!==""?num(raw):raw;
     const full=["Client","Address","Specs / Description","Facebook"].includes(key)?"full":"";
     return `<div class="f ${full}"><label for="${id}">${label}</label><input id="${id}" data-k="${esc(key)}" type="text" ${type==="number"?'inputmode="decimal"':""} value="${esc(v)}"></div>`;
   };
-  const idLine=!isNew&&t.idField?`<span class="sub">${t.idField==="S.N."?"No. ":""}${esc(r[t.idField])}</span>`:"";
+  const idLine=!isNew&&t.idField&&name!=="Calendar"?`<span class="sub">${t.idField==="S.N."?"No. ":""}${esc(r[t.idField])}</span>`:"";
+  let linkBox="";
+  if(name==="Clients"&&!isNew){
+    const pj=projectsFor(rec);const evs=allEvents().filter(e=>e.clientRef===rec&&e.iso>=today()&&e.status==="Scheduled").slice(0,3);
+    linkBox=`<div class="linkbox"><div class="lb-h"><b>Projects</b><div class="row"><button type="button" class="btn ghost sm" data-go="event">+ Schedule</button><button type="button" class="btn sm" data-go="project">${pj.length?"+ Another project":"Signed? Create project"}</button></div></div>
+      ${pj.length?pj.map(p=>`<button type="button" class="lb-item" data-go-project="${p._row}"><span>${esc(p["System (kWp)"]?p["System (kWp)"]+" kWp":"Project")} · ${esc(peso(p["Contract Price"]))}</span>${pill(p.Status)}</button>`).join(""):`<div class="lb-empty">No project yet. When this client signs the contract, create the project here and their details carry over.</div>`}
+      ${evs.length?`<div class="lb-ev">${evs.map(e=>`<span><i style="background:${typeColor(e.type)}"></i>${esc(fmtDate(e.iso).replace(/, \d{4}$/,""))}${e.start?" "+esc(fmtTime(e.start)):""} · ${esc(e.type)}</span>`).join("")}</div>`:""}</div>`;
+  }
   $("#modalRoot").innerHTML=`<div class="sheet" id="sheet"><div class="box" role="dialog" aria-modal="true" aria-labelledby="mTitle">
     <div class="hd"><div><h2 id="mTitle">${isNew?"New "+t.title.toLowerCase():"Edit "+t.title.toLowerCase()}</h2>${idLine}</div><button class="x" type="button" data-close aria-label="Close">×</button></div>
-    <form class="form" id="recForm">${t.fields.map(fieldHTML).join("")}</form>
+    ${linkBox}<form class="form" id="recForm">${t.fields.map(fieldHTML).join("")}</form>
     <div class="actions"><div id="delWrap">${isNew?"":'<button class="btn danger" type="button" id="delBtn">Delete</button>'}</div>
     <div class="row"><button class="btn ghost" type="button" data-close>Cancel</button><button class="btn" type="button" id="saveBtn">${isNew?"Add":"Save"}</button></div></div>
   </div></div>`;
 
-  const label=()=>{const el=document.querySelector('#recForm [data-k="Client"]');return (el&&el.value)||[r.Brand,r["Specs / Description"]].filter(Boolean).join(" ").slice(0,50)||""};
+  const pickName=()=>{const el=document.querySelector("#recForm [data-name-target]");return el&&el.selectedOptions[0]?el.selectedOptions[0].dataset.name||"":""};
+  const label=()=>{const el=document.querySelector('#recForm [data-k="Client"]');return pickName()||(el&&el.value)||[r.Brand,r["Specs / Description"]].filter(Boolean).join(" ").slice(0,50)||""};
+  const pick=document.querySelector("#recForm [data-name-target]");
+  const showCard=()=>{const card=$("#clientCard");if(!card||!pick)return;const c=clientByNo(pick.value);
+    if(!c){card.innerHTML="";return}
+    card.innerHTML=`<span>${esc([c.Address,c.Phone,c.DU,c.kWh?num(c.kWh)+" kWh/mo":"",c.Amount?peso(c.Amount)+"/mo bill":""].filter(Boolean).join(" · ")||"No details saved for this client yet")}</span>`;
+    const loc=document.querySelector('#recForm [data-k="Location"]');if(loc&&!loc.value&&c.Address)loc.value=c.Address;};
+  if(pick){pick.addEventListener("change",showCard);showCard()}
+  const proj=document.querySelector('#recForm [data-k="Project"]');
+  if(proj&&pick)proj.addEventListener("change",()=>{const p=projectById(proj.value);const c=p&&clientFor(p);if(c&&!pick.value){pick.value=c["S.N."];showCard()}});
+  const go=(fn)=>{if(ph.added.length||ph.busy){toast("Save this client first, then continue");return}close(false);fn()};
+  document.querySelectorAll("[data-go],[data-go-project]").forEach(b=>b.addEventListener("click",()=>{
+    if(b.dataset.goProject){const p=state.data.Projects.find(x=>x._row==b.dataset.goProject);go(()=>openForm("Projects",p));return}
+    const base={Client:rec.Client,"Client No.":rec["S.N."]};
+    if(b.dataset.go==="project")go(()=>openForm("Projects",null,{...base,Notes:rec.kWh?`Client uses ${num(rec.kWh)} kWh/month`+(rec.Amount?`, bill ${peso(rec.Amount)}`:""):""}));
+    else go(()=>openForm("Calendar",null,{...base,Location:rec.Address||"",Date:today()}));
+  }));
   const grid=$("#photoGrid"),input=$("#photoInput");
   const renderPhotos=()=>{
     if(!grid)return;
@@ -516,7 +630,10 @@ function openForm(name,rec,prefill){
   $("#recForm").addEventListener("submit",e=>e.preventDefault());
   $("#saveBtn").onclick=async()=>{
     if(ph.busy){toast("Wait for the photos to finish uploading");return}
-    document.querySelectorAll("#recForm [data-k]").forEach(el=>{r[el.dataset.k]=el.value.trim()});
+    document.querySelectorAll("#recForm [data-k]").forEach(el=>{r[el.dataset.k]=el.value.trim();if(el.dataset.nameTarget)r[el.dataset.nameTarget]=el.selectedOptions[0]?el.selectedOptions[0].dataset.name||"":""});
+    if(name==="Projects"&&!r.Client){toast("Choose the client for this project");return}
+    if(name==="Calendar"&&!r.Date){toast("Choose a date");return}
+    if(name==="Calendar"&&!r.Title)r.Title=(r.Type||"Event")+(r.Client?": "+r.Client:"");
     if(t.fields.some(f=>f[2]==="photos"))r.Photos=ph.ids.join(", ");
     const b=$("#saveBtn");b.disabled=true;b.textContent="Saving…";
     if(await saveRecord(name,r,isNew,rec)){ph.removed.forEach(id=>api({action:"trash",id}).catch(()=>{}));close(true)}
@@ -624,9 +741,12 @@ function bindToConsult(){
 /* ---------- events ---------- */
 document.addEventListener("click",async e=>{
   const v=e.target.closest("[data-view]");if(v){state.view=v.dataset.view;lsSet("solarays.view",state.view);render();window.scrollTo(0,0);return}
-  const n=e.target.closest("[data-new]");if(n){openForm(n.dataset.new);return}
+  const n=e.target.closest("[data-new]");if(n){openForm(n.dataset.new,null,n.dataset.date?{Date:n.dataset.date}:undefined);return}
   const ed=e.target.closest("[data-edit]");if(ed){const rec=state.data[ed.dataset.edit].find(r=>r._row==ed.dataset.row);if(rec)openForm(ed.dataset.edit,rec);return}
   const f=e.target.closest("[data-filter]");if(f){state.filter[f.dataset.filter]=f.dataset.val;render();return}
+  const cn=e.target.closest("[data-cal-nav]");if(cn){const d=+cn.dataset.calNav;if(!d){state.cal.sel=today();state.cal.month=today().slice(0,7)}else{const [y,m]=state.cal.month.split("-").map(Number);const nd=new Date(y,m-1+d,1);state.cal.month=`${nd.getFullYear()}-${pad(nd.getMonth()+1)}`;state.cal.sel=state.cal.month+"-01"}render();return}
+  const ct=e.target.closest("[data-cal-type]");if(ct){const ty=ct.dataset.calType,h=state.cal.hidden;state.cal.hidden=h.includes(ty)?h.filter(x=>x!==ty):[...h,ty];lsSet("solarays.calHidden",JSON.stringify(state.cal.hidden));render();return}
+  const cd=e.target.closest("[data-cal-day]");if(cd){state.cal.sel=cd.dataset.calDay;if(cd.dataset.calDay.slice(0,7)!==state.cal.month)state.cal.month=cd.dataset.calDay.slice(0,7);render();return}
   const pr=e.target.closest("[data-period]");if(pr){state.period=pr.dataset.period;lsSet("solarays.period",state.period);render();return}
   const a=e.target.closest("[data-act]");
   if(a&&a.dataset.act==="refresh"){state.sheetIds={};loadAll();return}
@@ -635,7 +755,7 @@ document.addEventListener("input",e=>{
   const s=e.target.closest("[data-search]");if(!s)return;
   const k=s.dataset.search;state.q[k]=s.value;const pos=s.selectionStart;render();const el=document.getElementById("q-"+k);if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(x){}}
 });
-document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;const v=document.querySelector(".viewer");if(v){v.remove();return}if(closeModal)closeModal();else $("#modalRoot").innerHTML=""});
+document.addEventListener("keydown",e=>{const day=e.target.closest&&e.target.closest("[data-cal-day]");if(day&&(e.key==="Enter"||e.key===" ")){e.preventDefault();day.click();return}if(e.key!=="Escape")return;const v=document.querySelector(".viewer");if(v){v.remove();return}if(closeModal)closeModal();else $("#modalRoot").innerHTML=""});
 /* Dashboard and Calculator are fixed screens on iPad landscape and laptops: block pinch and trackpad zoom there. */
 const lockedNow=()=>document.documentElement.classList.contains("lock")&&matchMedia("(min-width:1024px) and (min-height:600px)").matches;
 ["gesturestart","gesturechange"].forEach(t=>document.addEventListener(t,e=>{if(lockedNow()&&!e.target.closest(".sheet,.viewer"))e.preventDefault()},{passive:false}));
@@ -648,6 +768,7 @@ $("#settingsBtn").onclick=()=>{state.view="settings";render()};
 /* ---------- boot ---------- */
 try{const s=JSON.parse(lsGet("solarays.calc")||"null");if(s)Object.assign(calcIn,s)}catch(e){}
 {const p=lsGet("solarays.period");if(["30","12","all"].includes(p))state.period=p}
+state.cal.sel=today();state.cal.month=today().slice(0,7);try{const h=JSON.parse(lsGet("solarays.calHidden")||"[]");if(Array.isArray(h))state.cal.hidden=h}catch(e){}
 const sv=lsGet("solarays.view");if(sv&&VIEWS.some(x=>x[0]===sv))state.view=sv;
 if(location.hash&&VIEWS.some(x=>x[0]===location.hash.slice(1)))state.view=location.hash.slice(1);
 render();
