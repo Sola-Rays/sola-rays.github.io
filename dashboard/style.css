@@ -521,6 +521,9 @@ svg.anim .pt{transform-box:fill-box;transform-origin:center;animation:pop .35s e
 .pcount svg{width:16px;height:16px}
 .viewer{position:fixed;inset:0;z-index:80;background:rgba(6,10,16,.92);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding-top:max(16px,env(safe-area-inset-top,0px));padding-bottom:max(16px,env(safe-area-inset-bottom,0px));padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 .vimg{flex:1;min-height:0;width:100%;display:flex;align-items:center;justify-content:center}
+.vimg{position:relative}
 .vimg img{max-width:100%;max-height:100%;object-fit:contain;border-radius:12px}
+.vimg img.lowres{width:min(100%,900px);height:auto;filter:blur(2px)}
+.vload{position:absolute;left:50%;bottom:14px;transform:translateX(-50%);background:rgba(10,16,24,.8);color:#fff;font-size:12px;font-weight:600;padding:5px 12px;border-radius:999px}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media (prefers-reduced-motion:reduce){.ph-load,.spin{animation:none}}

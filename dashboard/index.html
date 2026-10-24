@@ -12,7 +12,7 @@
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2316212E'/%3E%3Ccircle cx='32' cy='32' r='13' fill='%23FFB612'/%3E%3C/svg%3E">
 <title>SolaRays Dashboard</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
-<link rel="stylesheet" href="style.css?v=2026-10-24-5">
+<link rel="stylesheet" href="style.css?v=2026-10-24-6">
 </head>
 <body>
 
@@ -601,10 +601,44 @@ function photoURL(id){
   const p=api({action:"photo",id}).then(j=>b64ToURL(j.data,j.mime));
   photoCache[id]=p;p.catch(()=>{delete photoCache[id]});return p;
 }
+/* Small previews: asked for in batches, kept in memory and saved on this device, so lists and forms open fast.
+   The full-size file is only downloaded when it is opened. */
+const TKEY="sr.thumb.";
+const thumbPending=new Map();let thumbTimer=null;
+const thumbLocal=id=>{try{const v=localStorage.getItem(TKEY+id);return v?JSON.parse(v):null}catch(e){return null}};
+function thumbSave(id,info){
+  if(!info||!info.url||!info.url.startsWith("data:")||info.url.length>120000)return;
+  try{localStorage.setItem(TKEY+id,JSON.stringify(info))}catch(e){
+    try{Object.keys(localStorage).filter(k=>k.startsWith(TKEY)).slice(0,40).forEach(k=>localStorage.removeItem(k));localStorage.setItem(TKEY+id,JSON.stringify(info))}catch(e2){}
+  }
+}
+function seedThumb(id,info){thumbCache[id]=Promise.resolve(info);thumbSave(id,info)}
+function flushThumbs(){
+  thumbTimer=null;
+  const batch=[...thumbPending.entries()].slice(0,12);batch.forEach(([id])=>thumbPending.delete(id));
+  if(thumbPending.size)thumbTimer=setTimeout(flushThumbs,0);
+  if(!batch.length)return;
+  api({action:"thumbs",ids:batch.map(b=>b[0])}).then(j=>{
+    const byId={};(j.items||[]).forEach(it=>{if(it&&it.id)byId[it.id]=it});
+    batch.forEach(([id,cb])=>{const it=byId[id];
+      if(!it||it.ok===false){cb.rej({code:"thumb_failed"});return}
+      const info={mime:it.mime,name:it.name,size:it.size,url:it.data?`data:${it.thumbMime||"image/jpeg"};base64,${it.data}`:null};
+      thumbSave(id,info);cb.res(info)});
+  }).catch(e=>batch.forEach(([,cb])=>cb.rej(e)));
+}
 function thumbInfo(id){
   if(thumbCache[id])return thumbCache[id];
-  const p=api({action:"thumb",id}).then(j=>({mime:j.mime,name:j.name,size:j.size,url:j.data?b64ToURL(j.data,j.thumbMime||"image/png"):null}));
+  const saved=thumbLocal(id);
+  if(saved){thumbCache[id]=Promise.resolve(saved);return thumbCache[id]}
+  const p=new Promise((res,rej)=>{thumbPending.set(id,{res,rej});if(!thumbTimer)thumbTimer=setTimeout(flushThumbs,30)});
   thumbCache[id]=p;p.catch(()=>{delete thumbCache[id]});return p;
+}
+/* Makes a small preview on the device from a photo the user just picked. */
+function previewFromImage(img){
+  const s=Math.min(1,320/Math.max(img.naturalWidth,img.naturalHeight));
+  const c=document.createElement("canvas");c.width=Math.max(1,Math.round(img.naturalWidth*s));c.height=Math.max(1,Math.round(img.naturalHeight*s));
+  const x=c.getContext("2d");x.fillStyle="#fff";x.fillRect(0,0,c.width,c.height);x.drawImage(img,0,0,c.width,c.height);
+  return c.toDataURL("image/jpeg",0.7);
 }
 const EXT_MIME={heic:"image/heic",heif:"image/heif",jpg:"image/jpeg",jpeg:"image/jpeg",png:"image/png",webp:"image/webp",gif:"image/gif",mov:"video/quicktime",mp4:"video/mp4",m4v:"video/mp4",webm:"video/webm",pdf:"application/pdf",xls:"application/vnd.ms-excel",xlsx:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",csv:"text/csv",doc:"application/msword",docx:"application/vnd.openxmlformats-officedocument.wordprocessingml.document"};
 const guessMime=f=>f.type||EXT_MIME[String(f.name||"").split(".").pop().toLowerCase()]||"application/octet-stream";
@@ -618,8 +652,8 @@ async function shrinkPhoto(file){
     const w=Math.max(1,Math.round(img.naturalWidth*s)),h=Math.max(1,Math.round(img.naturalHeight*s));
     const c=document.createElement("canvas");c.width=w;c.height=h;
     const ctx=c.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);
-    const d=c.toDataURL("image/jpeg",0.82);
-    return {data:d.slice(d.indexOf(",")+1),mime:"image/jpeg",name:String(file.name||"photo").replace(/\.[^.]+$/,"").slice(0,60)+".jpg"};
+    const d=c.toDataURL("image/jpeg",0.8);
+    return {data:d.slice(d.indexOf(",")+1),mime:"image/jpeg",name:String(file.name||"photo").replace(/\.[^.]+$/,"").slice(0,60)+".jpg",preview:previewFromImage(img)};
   }finally{URL.revokeObjectURL(url)}
 }
 async function prepareUpload(f){
@@ -651,7 +685,8 @@ function openViewer(id){
   document.body.appendChild(v);
   v.addEventListener("click",e=>{if(e.target===v||e.target.closest("[data-vclose]"))v.remove()});
   const box=v.querySelector(".vimg");
-  photoURL(id).then(u=>{box.innerHTML=`<img src="${u}" alt="Photo">`;
+  thumbInfo(id).then(i=>{if(i.url&&!box.querySelector("img.full"))box.innerHTML=`<img class="lowres" src="${i.url}" alt="Photo preview"><span class="vload">Loading full size…</span>`}).catch(()=>{});
+  photoURL(id).then(u=>{box.innerHTML=`<img class="full" src="${u}" alt="Photo">`;
     box.querySelector("img").onerror=()=>thumbInfo(id).then(i=>{box.innerHTML=i.url?`<img src="${i.url}" alt="Photo">`:`<div class="empty">This photo type can't be shown here. Open it in Google Drive.</div>`});
   }).catch(e=>{box.innerHTML=`<div class="empty">${esc(errMsg(e))}</div>`});
 }
@@ -867,11 +902,15 @@ function openForm(name,rec,prefill){
     input.addEventListener("change",async()=>{
       const files=[...input.files];input.value="";
       ph.busy+=files.length;renderFiles();
-      for(const f of files){
-        try{const s=await prepareUpload(f);const j=await api({action:"upload",sheet:t.sheet,label:label(),...s});ph.ids.push(j.id);ph.added.push(j.id)}
+      const one=async f=>{
+        try{const s=await prepareUpload(f);const {preview,...body}=s;
+          const j=await api({action:"upload",sheet:t.sheet,label:label(),...body});
+          seedThumb(j.id,{mime:s.mime,name:s.name,size:f.size,url:preview||null});
+          ph.ids.push(j.id);ph.added.push(j.id)}
         catch(e){toast(e&&(e.code==="too_big"||e.code==="bad_file")?e.message:"Upload failed: "+errMsg(e))}
         finally{ph.busy--;renderFiles()}
-      }
+      };
+      const queue=[...files];await Promise.all(Array.from({length:Math.min(3,queue.length)},async()=>{while(queue.length)await one(queue.shift())}));
     });
   }
 
