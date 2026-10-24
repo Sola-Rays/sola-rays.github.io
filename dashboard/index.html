@@ -1,0 +1,466 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="theme-color" content="#16212E">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="SolaRays">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%2316212E'/%3E%3Ccircle cx='32' cy='32' r='13' fill='%23FFB612'/%3E%3C/svg%3E">
+<title>SolaRays Dashboard</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><span class="s">Sola</span>Rays<small>Business Dashboard</small></div>
+    <nav class="nav" id="nav"></nav>
+    <div class="foot">
+      <div class="sync"><span class="dot" id="dot"></span><span id="syncText">Not connected</span></div>
+      <button class="btn ghost" id="refreshBtn" type="button">Refresh data</button>
+      <button class="btn ghost" id="settingsBtn" type="button">Database</button>
+    </div>
+  </aside>
+  <main id="main"></main>
+</div>
+<nav class="tabs" id="tabs"></nav>
+<div id="modalRoot"></div>
+
+<script>
+(()=>{
+const DEFAULT_SHEET="1jQj_Or2LacAQaQfj39y7PnXWtNRmQzKSgijXe-3o2uA";
+const ICONS={
+  home:'<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
+  clients:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5c1.9.6 3.1 2.4 3.5 5.5"/>',
+  consult:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
+  projects:'<path d="M3 9h18l-2 11H5z"/><path d="M3 9l3-5h12l3 5M9 13h6"/>',
+  suppliers:'<rect x="3" y="7" width="13" height="11" rx="1"/><path d="M16 11h3l2 3v4h-5"/><circle cx="7" cy="19" r="1.8"/><circle cx="18" cy="19" r="1.8"/>',
+  calc:'<rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8 6.5h8v3H8zM8.5 13h.01M12 13h.01M15.5 13h.01M8.5 17h.01M12 17h.01M15.5 17h.01"/>'
+};
+const ico=k=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">${ICONS[k]}</svg>`;
+const VIEWS=[["home","Dashboard"],["clients","Clients"],["projects","Projects"],["suppliers","Suppliers"],["calc","Calculator"]];
+
+/* Each section maps to a tab of the Google Sheet. Field keys are the sheet's column headers, exactly as written there. */
+const TABS={
+ Clients:{sheet:"CRM Dashboard",key:"clients",title:"Client",idField:"S.N.",idMode:"serial",filterField:"Consulted (Y/N)",filterOpts:["Yes","No"],fields:[
+  ["S.N.","No.","hidden"],["Client","Client name","text"],["Phone","Phone","text"],["Facebook","Facebook","text"],
+  ["Address","Address","text"],["GPS Coodinates","GPS coordinates","text"],
+  ["DU","Utility","text"],
+  ["Type","Type","select",["Residence","Business","Under Construction - Business","Under Construction - Residence","Farm","Government"]],
+  ["kWh","Monthly kWh","number"],["Amount","Monthly bill (₱)","number"],["Rate per kWh","Rate per kWh (₱)","number"],
+  ["Consulted (Y/N)","Consulted","select",["Yes","No"]],["Consultation Date","Consultation date","date"],["Notes","Notes","textarea"]]},
+ Projects:{sheet:"Projects",key:"projects",title:"Project",idField:"ID",idMode:"prefix",prefix:"PR",filterField:"Status",fields:[
+  ["ID","ID","hidden"],["Client","Client","client"],["System (kWp)","System (kWp)","number"],["Panels","Panels","text"],
+  ["Inverter","Inverter","text"],["Battery","Battery","text"],["Contract Price","Contract price (₱)","number"],
+  ["Payment","Payment","select",["Cash","GSIS loan"]],["Amount Received","Amount received (₱)","number"],
+  ["Status","Status","select",["Downpayment","Ordering","Scheduled","Installing","Awaiting loan release","Completed"]],
+  ["Start Date","Start date","date"],["Completion Date","Completion date","date"],["Notes","Notes","textarea"]]},
+ Suppliers:{sheet:"Suppliers",key:"suppliers",title:"Supplier item",idField:null,filterField:"Item",filterOpts:["PV Module","Inverter","Battery","Accessories"],fields:[
+  ["Supplier","Supplier","text"],["Item","Category","select",["PV Module","Inverter","Battery","Accessories"]],
+  ["Brand","Brand","text"],["Specs / Description","Specs / description","textarea"],["SRP","Price (₱)","number"]]}
+};
+Object.values(TABS).forEach(t=>{if(!t.filterOpts)t.filterOpts=t.fields.find(f=>f[0]===t.filterField)[3]});
+
+const state={view:"home",sheetId:null,data:{Clients:[],Projects:[],Suppliers:[]},heads:{},loaded:false,
+  filter:{clients:"All",projects:"All",suppliers:"All"},q:{clients:"",projects:"",suppliers:""},
+  error:null,sheetIds:{}};
+
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const num=v=>{if(v===""||v==null)return 0;const n=parseFloat(String(v).replace(/[^0-9.\-]/g,""));return isNaN(n)?0:n};
+const peso=v=>"₱"+Math.round(num(v)).toLocaleString("en-PH");
+const MON=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const pad=n=>String(n).padStart(2,"0");
+const today=()=>{const d=new Date();return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`};
+function toISO(s){
+  s=String(s||"").trim();if(!s)return "";
+  let m=s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);if(m)return `${m[1]}-${pad(m[2])}-${pad(m[3])}`;
+  m=s.match(/^(\d{1,2})[-\s]([A-Za-z]{3})[A-Za-z]*[-\s,]+(\d{4})$/);if(m){const i=MON.findIndex(x=>x.toLowerCase()===m[2].toLowerCase());if(i>=0)return `${m[3]}-${pad(i+1)}-${pad(m[1])}`}
+  m=s.match(/^([A-Za-z]{3})[A-Za-z]*\s+(\d{1,2}),?\s+(\d{4})$/);if(m){const i=MON.findIndex(x=>x.toLowerCase()===m[1].toLowerCase());if(i>=0)return `${m[3]}-${pad(i+1)}-${pad(m[2])}`}
+  m=s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);if(m)return `${m[3]}-${pad(m[1])}-${pad(m[2])}`;
+  return "";
+}
+const sheetDate=iso=>{if(!iso)return "";const [y,mo,d]=iso.split("-");return `${+d}-${MON[+mo-1]}-${y}`};
+const fmtDate=s=>{const i=toISO(s);if(!i)return s||"";const [y,mo,d]=i.split("-");return `${MON[+mo-1]} ${+d}, ${y}`};
+const qs=n=>`'${n.replace(/'/g,"''")}'`;
+const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
+const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
+
+function setSync(s,text){const d=$("#dot");d.className="dot "+(s==="ok"?"ok":s==="busy"?"busy":s==="err"?"err":"");$("#syncText").textContent=text}
+function toast(t){const el=document.createElement("div");el.className="toast";el.textContent=t;document.body.appendChild(el);setTimeout(()=>el.remove(),2200)}
+
+/* ---------- Google Sheets via the SolaRays Apps Script ---------- */
+const cfg={api:lsGet("solarays.api")||"",key:lsGet("solarays.key")||""};
+function errMsg(e){
+  const c=e&&e.code;
+  if(c==="offline")return "You're offline. Connect to Wi-Fi or mobile data, then tap Try again.";
+  if(c==="network")return "Couldn't reach your Google Sheet. Check your internet connection and the Web app URL under Database.";
+  if(c==="bad_key")return "The access key doesn't match the one in your Apps Script. Check it under Database.";
+  if(c==="bad_response")return "The Web app URL didn't answer like the SolaRays script. Copy the Web app URL that ends in /exec, and check that access is set to Anyone.";
+  if(c==="bad_row")return (e.message||"That row no longer exists.")+" Tap Try again to reload.";
+  if(c==="setup")return "Add your Web app URL and access key under Database.";
+  return (e&&e.message)||"Something went wrong talking to Google Sheets. Tap Try again.";
+}
+async function api(body){
+  if(!cfg.api||!cfg.key)throw {code:"setup"};
+  if(navigator.onLine===false)throw {code:"offline"};
+  let res;
+  try{res=await fetch(cfg.api,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},body:JSON.stringify({...body,key:cfg.key}),redirect:"follow"})}
+  catch(e){throw {code:navigator.onLine===false?"offline":"network"}}
+  let j;try{j=await res.json()}catch(e){throw {code:"bad_response"}}
+  if(!j||!j.ok)throw {code:(j&&j.error)||"bad_response",message:j&&j.message};
+  return j;
+}
+async function loadAll(){
+  if(!cfg.api||!cfg.key)return;
+  setSync("busy","Syncing with Google Sheets…");state.error=null;
+  try{
+    const tabs={};Object.values(TABS).forEach(t=>tabs[t.sheet]=t.fields.map(f=>f[0]));
+    const j=await api({action:"read",tabs});
+    for(const [name,t] of Object.entries(TABS)){
+      const vals=(j.tabs[t.sheet]&&j.tabs[t.sheet].values)||[];
+      const head=(vals[0]&&vals[0].some(Boolean)?vals[0]:t.fields.map(f=>f[0])).map(h=>String(h).trim());
+      state.heads[name]=head;
+      state.data[name]=vals.slice(1).map((r,i)=>{const o={_row:i+2};head.forEach((h,k)=>o[h]=r[k]??"");return o})
+        .filter(o=>head.some(h=>h!==t.idField&&String(o[h]).trim()!==""));
+      if(name==="Suppliers")state.data[name]=state.data[name].filter(o=>o.Item||o.SRP);
+    }
+    state.loaded=true;
+    setSync("ok","Synced "+new Date().toLocaleTimeString("en-PH",{hour:"numeric",minute:"2-digit"}));
+  }catch(e){state.error=e;setSync("err","Sync failed")}
+  render();
+}
+function cellValue(type,v){
+  if(type==="date")return sheetDate(v);
+  if(type==="number")return v===""?"":num(v);
+  return v;
+}
+async function saveRecord(name,rec,isNew,orig){
+  const t=TABS[name];const head=state.heads[name]||t.fields.map(f=>f[0]);
+  const type=h=>(t.fields.find(f=>f[0]===h)||[,,"text"])[2];
+  let row;
+  if(isNew){row=head.map(h=>h in rec?cellValue(type(h),rec[h]):"")}
+  else{row=head.map(h=>{
+    if(!(h in rec))return null;
+    const ty=type(h),a=rec[h],b=orig[h];
+    const same=ty==="date"?toISO(a)===toISO(b):ty==="number"?(String(a).trim()===""?String(b).trim()==="":num(a)===num(b)&&String(b).trim()!==""):String(a)===String(b);
+    return same?null:cellValue(ty,a);
+  })}
+  setSync("busy","Saving…");
+  try{
+    if(isNew)await api({action:"append",sheet:t.sheet,values:row});
+    else if(row.some(v=>v!==null))await api({action:"update",sheet:t.sheet,row:rec._row,values:row});
+    toast(isNew?t.title+" added":t.title+" saved");
+    await loadAll();return true;
+  }catch(e){state.error=e;setSync("err","Save failed");render();return false}
+}
+async function deleteRecord(name,rec){
+  const t=TABS[name];setSync("busy","Deleting…");
+  try{
+    await api({action:"delete",sheet:t.sheet,row:rec._row});
+    toast(t.title+" deleted");await loadAll();return true;
+  }catch(e){state.error=e;setSync("err","Delete failed");render();return false}
+}
+
+/* ---------- status pills ---------- */
+const PILL={Consulted:"good",Yes:"good",No:"",Scheduled:"info",Done:"",Quoted:"warn",Won:"good",Lost:"bad",
+  Downpayment:"warn",Ordering:"info",Installing:"warn",Completed:"good","Awaiting loan release":"info"};
+const pill=s=>s?`<span class="pill ${PILL[s]||""}">${esc(s)}</span>`:"";
+
+/* ---------- render ---------- */
+function renderNav(){
+  const html=VIEWS.map(([k,l])=>`<button type="button" data-view="${k}" ${state.view===k?'aria-current="page"':""}>${ico(k)}<span>${l}</span></button>`).join("");
+  $("#nav").innerHTML=html;$("#tabs").innerHTML=html;
+}
+function render(){
+  renderNav();
+  const m=$("#main");
+  if(!cfg.api||!cfg.key)state.view="settings";
+  if(state.view==="settings"){m.innerHTML=settingsView();bindSettings();return}
+  const banner=state.error?`<div class="banner"><span>${esc(errMsg(state.error))}</span><span class="row"><button class="btn ghost" type="button" data-act="refresh">Try again</button></span></div>`:"";
+  const loading=!state.loaded&&!state.error?`<div class="empty" style="margin-bottom:16px">Loading your Google Sheet…</div>`:"";
+  const v={home:homeView,clients:()=>listView("Clients"),projects:()=>listView("Projects"),suppliers:()=>listView("Suppliers"),calc:calcView}[state.view];
+  m.innerHTML=banner+loading+v();
+  if(state.view==="calc")bindCalc();
+}
+function header(title,sub,actions=""){
+  return `<div class="top"><div><h1>${title}</h1><div class="sub">${sub}</div></div><div class="row">${actions}</div></div>`;
+}
+function settingsView(){
+  const sheet=`https://docs.google.com/spreadsheets/d/${DEFAULT_SHEET}/edit`;
+  return `<div class="setup">
+  <div class="mbrand" style="display:block"><span class="s">Sola</span>Rays</div>
+  <h1>Database</h1>
+  <p class="sub" style="font-size:15px;margin:8px 0 16px">Connect this device to your Google Sheet through the SolaRays Apps Script. Enter both once per device; they stay saved in this browser only.</p>
+  <div class="form">
+    <div class="f full"><label for="apiUrl">Web app URL</label><input id="apiUrl" value="${esc(cfg.api)}" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+    <div class="f full"><label for="apiKey">Access key</label><input id="apiKey" type="password" value="${esc(cfg.key)}" placeholder="The ACCESS_KEY from your script" autocomplete="off" autocapitalize="off" spellcheck="false"></div>
+  </div>
+  <div id="setupErr" class="sub" style="color:var(--bad);margin-top:10px"></div>
+  <div class="actions"><a class="btn ghost" href="${sheet}" target="_blank" rel="noopener" style="text-decoration:none">Open Google Sheet</a><button class="btn" id="connectBtn" type="button">Connect</button></div></div>`;
+}
+function bindSettings(){
+  $("#connectBtn").onclick=async()=>{
+    const url=$("#apiUrl").value.trim(),key=$("#apiKey").value.trim();
+    if(!/^https:\/\/script\.google(usercontent)?\.com\/.+/.test(url)){$("#setupErr").textContent="Paste the Web app URL from Apps Script. It starts with https://script.google.com/macros/s/ and ends with /exec.";return}
+    if(!key){$("#setupErr").textContent="Enter the access key you set in the script.";return}
+    const prev={...cfg};cfg.api=url;cfg.key=key;
+    $("#connectBtn").disabled=true;$("#connectBtn").textContent="Connecting…";
+    try{await api({action:"read",tabs:{}});lsSet("solarays.api",url);lsSet("solarays.key",key);state.view="home";toast("Connected to Google Sheets");await loadAll()}
+    catch(e){Object.assign(cfg,prev);$("#setupErr").textContent=errMsg(e);$("#connectBtn").disabled=false;$("#connectBtn").textContent="Connect"}
+  };
+}
+
+const SVG=k=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${k}</svg>`;
+const KICON={
+  clients:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5c1.9.6 3.1 2.4 3.5 5.5"/>',
+  projects:'<path d="M3 9h18l-2 11H5z"/><path d="M3 9l3-5h12l3 5M9 13h6"/>',
+  peso:'<path d="M7 20V4h6a4 4 0 0 1 0 8H7M4 8h15M4 11h15"/>',
+  done:'<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>'
+};
+const initials=n=>String(n||"?").replace(/\(.*?\)/g,"").split(/\s+/).filter(w=>/^[A-Za-zÑñ]/.test(w)).slice(0,2).map(w=>w[0].toUpperCase()).join("")||"?";
+function personHTML(c,i,withDate){
+  const iso=toISO(c["Consultation Date"]);
+  const left=withDate&&iso?`<div class="datechip"><div class="mo">${MON[+iso.slice(5,7)-1].toUpperCase()}</div><div class="dy">${+iso.slice(8,10)}</div></div>`:`<div class="av ${i===0?"y":""}">${esc(initials(c.Client))}</div>`;
+  const d=[String(c.Address||"").split(",")[0],c.DU,c.kWh?num(c.kWh)+" kWh/mo":"",c.Type].filter(Boolean).join(" · ");
+  return `<button type="button" class="person" data-edit="Clients" data-row="${c._row}">${left}<div class="m"><div class="t">${esc(c.Client||"Unnamed")}</div><div class="d">${esc(d)}</div></div><div class="r">${c.Amount?`<span class="amt">${peso(c.Amount)}</span><span class="sub">per month</span>`:""}</div></button>`;
+}
+function jobHTML(p){
+  const price=num(p["Contract Price"]),paid=num(p["Amount Received"]);const pct=price?Math.min(100,Math.round(paid/price*100)):0;
+  return `<button type="button" class="job" data-edit="Projects" data-row="${p._row}"><div class="row2"><span class="t">${esc(p.Client||"No client")}</span>${pill(p.Status)}</div><div class="d">${esc([p["System (kWp)"]?p["System (kWp)"]+" kWp":"",p.Inverter,p.Payment].filter(Boolean).join(" · "))}</div><div class="row2"><span class="amt">${peso(price)}</span><span class="sub">${pct>=100?"Fully paid":peso(paid)+" · "+pct+"%"}</span></div><div class="prog"><div class="${pct>=100?"full":""}" style="width:${pct}%"></div></div></button>`;
+}
+function homeView(){
+  const {Clients,Projects}=state.data;const t=today();
+  const cd=c=>toISO(c["Consultation Date"]);
+  const consulted=Clients.filter(c=>c["Consulted (Y/N)"]==="Yes");
+  const waiting=Clients.filter(c=>c["Consulted (Y/N)"]!=="Yes");
+  const thisMonth=consulted.filter(c=>cd(c).slice(0,7)===t.slice(0,7)).length;
+  const recent=[...consulted].sort((a,b)=>cd(b).localeCompare(cd(a))).slice(0,4);
+  const active=Projects.filter(p=>p.Status!=="Completed");
+  const pipeline=active.reduce((s,p)=>s+num(p["Contract Price"]),0);
+  const collect=active.reduce((s,p)=>s+Math.max(0,num(p["Contract Price"])-num(p["Amount Received"])),0);
+  const stages=["Downpayment","Ordering","Scheduled","Installing","Awaiting loan release"];
+  const maxN=Math.max(1,...stages.map(s=>active.filter(p=>p.Status===s).length));
+  const hr=new Date().getHours();const greet=hr<12?"Good morning":hr<18?"Good afternoon":"Good evening";
+  const date=new Date().toLocaleDateString("en-PH",{weekday:"long",month:"long",day:"numeric"});
+  const waitItem=c=>{
+    const d=[String(c.Address||"").split(",")[0],c.DU,c.kWh?num(c.kWh)+" kWh/mo":"",c.Phone].filter(Boolean).join(" · ")||"No details yet";
+    return `<button type="button" class="item" data-edit="Clients" data-row="${c._row}"><div class="m"><div class="t">${esc(c.Client||"Unnamed")}</div><div class="d">${esc(d)}</div></div><div class="r">${c.Type?`<span class="pill warn">${esc(c.Type)}</span>`:""}${c.Amount?`<span class="amt">${peso(c.Amount)}</span>`:""}</div></button>`;
+  };
+  const visit=c=>{
+    const iso=cd(c);
+    const d=[String(c.Address||"").split(",")[0],c.kWh?num(c.kWh)+" kWh/mo":"",c.DU].filter(Boolean).join(" · ");
+    return `<button type="button" class="visit" data-edit="Clients" data-row="${c._row}"><div class="datechip">${iso?`<div class="mo">${MON[+iso.slice(5,7)-1].toUpperCase()}</div><div class="dy">${+iso.slice(8,10)}</div>`:'<div class="dy">–</div>'}</div><div class="m"><div class="t">${esc(c.Client||"Unnamed")}</div><div class="d">${esc(d)}</div></div>${c.Amount?`<span class="amt">${peso(c.Amount)}</span>`:""}</button>`;
+  };
+  return `<div class="top"><div><div class="mbrand"><span class="s">Sola</span>Rays</div><h1>${greet}, Raymund</h1><div class="sub">${date}</div></div>
+    <div class="row"><button class="btn ghost" type="button" data-new="Projects">+ Project</button><button class="btn" type="button" data-new="Clients">+ Client</button></div></div>
+  <div class="kpis4">
+    <div class="kpi"><div class="l">Active projects</div><div class="v">${active.length}</div><div class="h">${peso(pipeline)} contract value</div></div>
+    <div class="kpi"><div class="l">To collect</div><div class="v y">${peso(collect)}</div><div class="h">Balance on active jobs</div></div>
+    <div class="kpi"><div class="l">Not yet consulted</div><div class="v" style="color:${waiting.length?"var(--bad)":"var(--text)"}">${waiting.length}</div><div class="h">Clients waiting for a visit</div></div>
+    <div class="kpi"><div class="l">Clients</div><div class="v">${Clients.length}</div><div class="h">${consulted.length} consulted · ${thisMonth} this month</div></div>
+  </div>
+  <div class="homegrid">
+    <div class="panel tall"><div class="hd"><h2>Not yet consulted</h2>${waiting.length?`<span class="flag">${waiting.length} waiting</span>`:""}</div>
+      <div class="list">${waiting.length?waiting.slice(0,6).map(waitItem).join(""):'<div class="empty">Every client has been consulted. New clients you add show here until their visit.</div>'}</div></div>
+    <div class="stack">
+      <div class="panel"><div class="hd"><h2>Installation pipeline</h2><span class="sub">${active.length} active job${active.length===1?"":"s"}</span></div>
+        <div class="pipe">${stages.map(s=>{const n=active.filter(p=>p.Status===s).length;return `<div class="bar"><span>${s}</span><div class="track"><div class="fill" style="width:${n/maxN*100}%"></div></div><span class="n">${n}</span></div>`}).join("")}</div></div>
+      <div class="panel tall"><div class="hd"><h2>Latest consultations</h2><button class="btn ghost" type="button" data-view="clients">All</button></div>
+        <div class="visits">${recent.length?recent.map(visit).join(""):'<div class="empty">No consulted clients yet.</div>'}</div></div>
+    </div>
+  </div>`;
+}
+
+function itemHTML(name,r){
+  let t="",d="",right="";
+  if(name==="Clients"){t=r.Client||"Unnamed";d=[r.Address,r.Phone,r.DU,r.kWh?num(r.kWh)+" kWh/mo":""].filter(Boolean).join(" · ");right=pill(r["Consulted (Y/N)"]==="Yes"?"Consulted":"")+(r.Amount?`<span class="amt">${peso(r.Amount)}/mo</span>`:"")+(r.Type?`<span class="sub">${esc(r.Type)}</span>`:"")}
+  if(name==="Projects"){const bal=num(r["Contract Price"])-num(r["Amount Received"]);t=r.Client||"No client";d=[r["System (kWp)"]?r["System (kWp)"]+" kWp":"",r.Inverter,r.Payment].filter(Boolean).join(" · ");right=pill(r.Status)+`<span class="amt">${peso(r["Contract Price"])}</span>${bal>0?`<span class="sub">Bal ${peso(bal)}</span>`:""}`}
+  if(name==="Suppliers"){t=[r.Brand&&r.Brand!=="-"?r.Brand:"",String(r["Specs / Description"]).split(",")[0]].filter(Boolean).join(" · ")||"Item";d=[r.Supplier,r["Specs / Description"]].filter(Boolean).join(" · ");right=`<span class="amt">${peso(r.SRP)}</span><span class="pill">${esc(r.Item)}</span>`}
+  return `<button type="button" class="item" data-edit="${name}" data-row="${r._row}"><div class="m"><div class="t">${esc(t)}</div><div class="d">${esc(d)}</div></div><div class="r">${right}</div></button>`;
+}
+
+function listView(name){
+  const t=TABS[name],k=t.key;
+  const q=state.q[k].toLowerCase();
+  const all=state.data[name];
+  let rows=all.filter(r=>(state.filter[k]==="All"||r[t.filterField]===state.filter[k])&&(!q||Object.values(r).join(" ").toLowerCase().includes(q)));
+  if(name==="Suppliers")rows.sort((a,b)=>String(a.Item).localeCompare(String(b.Item))||num(a.SRP)-num(b.SRP));
+  const subs={Clients:"From the CRM Dashboard tab",Projects:"Jobs from downpayment to switch-on",Suppliers:"Your buying prices for quoting"};
+  const label={Clients:"Consulted"}[name];
+  return header(name,`${all.length} records · ${subs[name]}`,`<button class="btn" type="button" data-new="${name}">+ Add ${t.title.toLowerCase()}</button>`)+
+  `<div class="toolbar"><input type="search" id="q-${k}" placeholder="Search ${name.toLowerCase()}" value="${esc(state.q[k])}" data-search="${k}"></div>
+   <div class="chips">${["All",...t.filterOpts].map(o=>`<button type="button" class="chip" data-filter="${k}" data-val="${esc(o)}" aria-pressed="${state.filter[k]===o}">${label&&o!=="All"?label+": ":""}${esc(o)} <span style="opacity:.6">${o==="All"?all.length:all.filter(r=>r[t.filterField]===o).length}</span></button>`).join("")}</div>
+   <div class="list">${rows.length?rows.map(r=>itemHTML(name,r)).join(""):`<div class="empty">${all.length?"Nothing matches this search or filter.":`No ${name.toLowerCase()} yet. Tap Add to create the first one; it is saved to the ${t.sheet} tab of your sheet.`}</div>`}</div>`;
+}
+
+/* ---------- modal form ---------- */
+function openForm(name,rec,prefill){
+  const t=TABS[name];const isNew=!rec;const r=rec?{...rec}:{...prefill};
+  if(isNew){
+    if(t.idMode==="serial")r[t.idField]=Math.max(0,...state.data[name].map(x=>num(x[t.idField])))+1;
+    if(t.idMode==="prefix")r[t.idField]=t.prefix+"-"+Date.now().toString(36).toUpperCase();
+    if(name==="Clients"){r["Consulted (Y/N)"]=r["Consulted (Y/N)"]||"No"}
+    if(name==="Projects")r.Status=r.Status||"Downpayment";
+  }
+  const clients=state.data.Clients.map(c=>c.Client).filter(Boolean).sort();
+  const fieldHTML=([key,label,type,opts])=>{
+    const id="fld-"+key.replace(/[^A-Za-z0-9]/g,"_");const raw=r[key]??"";
+    if(type==="hidden")return "";
+    if(type==="textarea")return `<div class="f full"><label for="${id}">${label}</label><textarea id="${id}" data-k="${esc(key)}">${esc(raw)}</textarea></div>`;
+    if(type==="select"){const list=raw&&!opts.includes(raw)?[...opts,raw]:opts;return `<div class="f"><label for="${id}">${label}</label><select id="${id}" data-k="${esc(key)}"><option value=""></option>${list.map(o=>`<option ${raw===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>`}
+    if(type==="client")return `<div class="f"><label for="${id}">${label}</label><input id="${id}" data-k="${esc(key)}" list="clientList" value="${esc(raw)}" autocomplete="off"><datalist id="clientList">${clients.map(c=>`<option value="${esc(c)}"></option>`).join("")}</datalist></div>`;
+    if(type==="date")return `<div class="f"><label for="${id}">${label}</label><input id="${id}" data-k="${esc(key)}" type="date" value="${esc(toISO(raw))}"></div>`;
+    const v=type==="number"&&raw!==""?num(raw):raw;
+    const full=["Client","Address","Specs / Description","Facebook"].includes(key)?"full":"";
+    return `<div class="f ${full}"><label for="${id}">${label}</label><input id="${id}" data-k="${esc(key)}" type="text" ${type==="number"?'inputmode="decimal"':""} value="${esc(v)}"></div>`;
+  };
+  const idLine=!isNew&&t.idField?`<span class="sub">${t.idField==="S.N."?"No. ":""}${esc(r[t.idField])}</span>`:"";
+  $("#modalRoot").innerHTML=`<div class="sheet" id="sheet"><div class="box" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <div class="hd"><div><h2 id="mTitle">${isNew?"New "+t.title.toLowerCase():"Edit "+t.title.toLowerCase()}</h2>${idLine}</div><button class="x" type="button" data-close aria-label="Close">×</button></div>
+    <form class="form" id="recForm">${t.fields.map(fieldHTML).join("")}</form>
+    <div class="actions"><div id="delWrap">${isNew?"":'<button class="btn danger" type="button" id="delBtn">Delete</button>'}</div>
+    <div class="row"><button class="btn ghost" type="button" data-close>Cancel</button><button class="btn" type="button" id="saveBtn">${isNew?"Add":"Save"}</button></div></div>
+  </div></div>`;
+  const close=()=>{$("#modalRoot").innerHTML=""};
+  $("#sheet").addEventListener("click",e=>{if(e.target.id==="sheet"||e.target.closest("[data-close]"))close()});
+  $("#recForm").addEventListener("submit",e=>e.preventDefault());
+  $("#saveBtn").onclick=async()=>{
+    document.querySelectorAll("#recForm [data-k]").forEach(el=>{r[el.dataset.k]=el.value.trim()});
+    const b=$("#saveBtn");b.disabled=true;b.textContent="Saving…";
+    if(await saveRecord(name,r,isNew,rec))close();else{b.disabled=false;b.textContent=isNew?"Add":"Save"}
+  };
+  const del=$("#delBtn");
+  const askDelete=()=>{
+    $("#delWrap").innerHTML=`<div class="confirm">Delete this row from the sheet? <button class="btn danger" type="button" id="delYes">Yes, delete</button><button class="btn ghost" type="button" id="delNo">Keep</button></div>`;
+    $("#delNo").onclick=()=>{$("#delWrap").innerHTML='<button class="btn danger" type="button" id="delBtn">Delete</button>';$("#delBtn").onclick=askDelete};
+    $("#delYes").onclick=async()=>{$("#delYes").disabled=true;if(await deleteRecord(name,rec))close()};
+  };
+  if(del)del.onclick=askDelete;
+}
+
+/* ---------- calculator ---------- */
+const calcIn={mode:"bill",bill:6000,kwh:500,rate:12,psh:4.5,loss:20,night:50,mult:2,bos:15,panelW:620};
+const specOf=s=>String(s["Specs / Description"]||"")+" "+String(s.Brand||"");
+const kwOf=s=>{const m=specOf(s).match(/(\d+(?:\.\d+)?)\s*kW(?!h)/i);return m?parseFloat(m[1]):0};
+const kwhOf=s=>{const m=specOf(s).match(/(\d+(?:\.\d+)?)\s*kWh/i);return m?parseFloat(m[1]):0};
+const wOf=s=>{const m=specOf(s).match(/(\d{3})\s*W\b/i);return m?parseInt(m[1]):0};
+const itemName=s=>[s.Brand&&s.Brand!=="-"?s.Brand:"",String(s["Specs / Description"]).split(",").slice(0,2).join(",")].filter(Boolean).join(" ");
+function cheapest(cat,test){
+  return state.data.Suppliers.filter(s=>s.Item===cat&&num(s.SRP)>0&&(!test||test(s))).sort((a,b)=>num(a.SRP)-num(b.SRP))[0]||null;
+}
+function computeCalc(){
+  const c=calcIn;
+  const monthlyKWh=c.mode==="bill"?num(c.bill)/Math.max(0.01,num(c.rate)):num(c.kwh);
+  const daily=monthlyKWh/30;
+  const pr=1-num(c.loss)/100;
+  const kwp=daily/((num(c.psh)*pr)||1);
+  const panelW=num(c.panelW)||620;
+  const panels=Math.max(1,Math.ceil(kwp*1000/panelW));
+  const actualKwp=panels*panelW/1000;
+  const invSizes=[3,5,6,8,10,12,16,20];
+  const invKW=invSizes.find(s=>s>=actualKwp*0.9)||Math.ceil(actualKwp);
+  const battNeed=daily*num(c.night)/100/0.9;
+  const battKWh=battNeed>0?Math.ceil(battNeed/5.12)*5.12:0;
+  const prodMonthly=actualKwp*num(c.psh)*pr*30;
+  const savings=Math.min(prodMonthly,monthlyKWh)*num(c.rate);
+  const pv=cheapest("PV Module",s=>wOf(s)&&Math.abs(wOf(s)-panelW)<=10)||cheapest("PV Module");
+  const inv=cheapest("Inverter",s=>kwOf(s)>=invKW)||cheapest("Inverter");
+  const bats=state.data.Suppliers.filter(s=>s.Item==="Battery"&&num(s.SRP)>0&&kwhOf(s)>=5);
+  const perKWh=bats.length?Math.min(...bats.map(s=>num(s.SRP)/kwhOf(s))):0;
+  const pvCost=pv?num(pv.SRP)*panels:0,invCost=inv?num(inv.SRP):0,batCost=perKWh*battKWh;
+  const major=pvCost+invCost+batCost,bosCost=major*num(c.bos)/100,material=major+bosCost,sell=material*num(c.mult);
+  const payback=savings>0?sell/(savings*12):0;
+  return {monthlyKWh,daily,panels,panelW,actualKwp,invKW,battKWh,prodMonthly,savings,pv,inv,perKWh,pvCost,invCost,batCost,bosCost,material,sell,payback,hasPrices:!!(pv||inv||perKWh)};
+}
+function calcResultHTML(){
+  const r=computeCalc();
+  return `<div class="big">
+    <div><div class="l">System</div><div class="v">${r.actualKwp.toFixed(2)}<span>kWp</span></div></div>
+    <div><div class="l">Panels</div><div class="v">${r.panels}<span>× ${r.panelW}W</span></div></div>
+    <div><div class="l">Battery</div><div class="v">${r.battKWh.toFixed(2)}<span>kWh</span></div></div>
+  </div>
+  <div class="kv">
+    <div><span>Monthly consumption</span><span>${Math.round(r.monthlyKWh)} kWh (${r.daily.toFixed(1)} kWh/day)</span></div>
+    <div><span>Hybrid inverter</span><span>${r.invKW} kW${r.inv?" · "+esc(itemName(r.inv)):""}</span></div>
+    <div><span>Expected solar output</span><span>${Math.round(r.prodMonthly)} kWh/month</span></div>
+    <div><span>Estimated savings</span><span>${peso(r.savings)}/month</span></div>
+  </div>
+  <h2 style="margin:18px 0 6px">Costing</h2>
+  ${r.hasPrices?`<div class="kv">
+    <div><span>Panels${r.pv?" ("+esc(r.pv.Supplier)+", "+peso(r.pv.SRP)+" each)":""}</span><span>${peso(r.pvCost)}</span></div>
+    <div><span>Inverter${r.inv?" ("+esc(r.inv.Supplier)+")":""}</span><span>${peso(r.invCost)}</span></div>
+    <div><span>Battery (${r.perKWh?peso(r.perKWh)+"/kWh":"no price"})</span><span>${peso(r.batCost)}</span></div>
+    <div><span>Mounting, cables, protection (${esc(calcIn.bos)}%)</span><span>${peso(r.bosCost)}</span></div>
+    <div><span>Material cost</span><span>${peso(r.material)}</span></div>
+    <div class="tot"><span>Suggested selling price</span><span>${peso(r.sell)}</span></div>
+    <div><span>Simple payback</span><span>${r.payback?r.payback.toFixed(1)+" years":"–"}</span></div>
+  </div>`:'<div class="empty">Costing fills in from your Suppliers tab once it has loaded.</div>'}
+  <p class="note">Internal estimate for planning a quotation, using the cheapest matching item in each category. The final quotation depends on the site visit, roof and actual stock.</p>
+  <div class="actions"><span></span><button class="btn" type="button" id="toConsult">Save as new client</button></div>`;
+}
+function calcView(){
+  const c=calcIn;
+  const pvOpts=[...new Set([620,640,...state.data.Suppliers.filter(s=>s.Item==="PV Module").map(wOf).filter(Boolean)])].sort((a,b)=>a-b);
+  return header("Solar Calculator","Size a hybrid system from the client's bill")+
+  `<div class="calc"><div class="panel"><div class="form" id="calcForm">
+    <div class="f full"><label>Based on</label><div class="seg"><button type="button" data-mode="bill" aria-pressed="${c.mode==="bill"}">Monthly bill (₱)</button><button type="button" data-mode="kwh" aria-pressed="${c.mode==="kwh"}">Monthly kWh</button></div></div>
+    <div class="f" ${c.mode==="bill"?"":"hidden"}><label for="c-bill">Monthly bill (₱)</label><input id="c-bill" data-c="bill" inputmode="decimal" value="${esc(c.bill)}"></div>
+    <div class="f" ${c.mode==="kwh"?"":"hidden"}><label for="c-kwh">Monthly kWh</label><input id="c-kwh" data-c="kwh" inputmode="decimal" value="${esc(c.kwh)}"></div>
+    <div class="f"><label for="c-rate">Rate (₱/kWh)</label><input id="c-rate" data-c="rate" inputmode="decimal" value="${esc(c.rate)}"><span class="hint">From the client's latest bill</span></div>
+    <div class="f"><label for="c-psh">Peak sun hours</label><input id="c-psh" data-c="psh" inputmode="decimal" value="${esc(c.psh)}"></div>
+    <div class="f"><label for="c-loss">System losses (%)</label><input id="c-loss" data-c="loss" inputmode="decimal" value="${esc(c.loss)}"></div>
+    <div class="f"><label for="c-night">Night use on battery (%)</label><input id="c-night" data-c="night" inputmode="decimal" value="${esc(c.night)}"><span class="hint">Share of daily kWh used after sunset</span></div>
+    <div class="f"><label for="c-panelW">Panel size (W)</label><select id="c-panelW" data-c="panelW">${pvOpts.map(w=>`<option ${w==c.panelW?"selected":""}>${w}</option>`).join("")}</select></div>
+    <div class="f"><label for="c-bos">Balance of system (%)</label><input id="c-bos" data-c="bos" inputmode="decimal" value="${esc(c.bos)}"><span class="hint">Mounting, cables, breakers</span></div>
+    <div class="f"><label for="c-mult">Selling price multiplier</label><input id="c-mult" data-c="mult" inputmode="decimal" value="${esc(c.mult)}"><span class="hint">Material cost × this</span></div>
+  </div></div>
+  <div class="panel result" id="calcOut">${calcResultHTML()}</div></div>`;
+}
+function bindCalc(){
+  const upd=()=>{$("#calcOut").innerHTML=calcResultHTML();bindToConsult()};
+  document.querySelectorAll("[data-c]").forEach(el=>el.addEventListener("input",()=>{calcIn[el.dataset.c]=el.tagName==="SELECT"?num(el.value):el.value;lsSet("solarays.calc",JSON.stringify(calcIn));upd()}));
+  document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{calcIn.mode=b.dataset.mode;render()});
+  bindToConsult();
+}
+function bindToConsult(){
+  const b=$("#toConsult");if(!b)return;
+  b.onclick=()=>{const r=computeCalc();const bill=calcIn.mode==="bill"?num(calcIn.bill):Math.round(r.monthlyKWh*num(calcIn.rate));openForm("Clients",null,{"kWh":Math.round(r.monthlyKWh),"Amount":bill,"Rate per kWh":num(calcIn.rate),"Consulted (Y/N)":"Yes","Consultation Date":today(),
+    Notes:`Calculator: ${r.actualKwp.toFixed(2)} kWp (${r.panels} x ${r.panelW}W), ${r.invKW}kW hybrid inverter, ${r.battKWh.toFixed(2)}kWh battery. Suggested price ${peso(r.sell)}.`})};
+}
+
+/* ---------- events ---------- */
+document.addEventListener("click",async e=>{
+  const v=e.target.closest("[data-view]");if(v){state.view=v.dataset.view;lsSet("solarays.view",state.view);render();window.scrollTo(0,0);return}
+  const n=e.target.closest("[data-new]");if(n){openForm(n.dataset.new);return}
+  const ed=e.target.closest("[data-edit]");if(ed){const rec=state.data[ed.dataset.edit].find(r=>r._row==ed.dataset.row);if(rec)openForm(ed.dataset.edit,rec);return}
+  const f=e.target.closest("[data-filter]");if(f){state.filter[f.dataset.filter]=f.dataset.val;render();return}
+  const a=e.target.closest("[data-act]");
+  if(a&&a.dataset.act==="refresh"){state.sheetIds={};loadAll();return}
+});
+document.addEventListener("input",e=>{
+  const s=e.target.closest("[data-search]");if(!s)return;
+  const k=s.dataset.search;state.q[k]=s.value;const pos=s.selectionStart;render();const el=document.getElementById("q-"+k);if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(x){}}
+});
+document.addEventListener("keydown",e=>{if(e.key==="Escape")$("#modalRoot").innerHTML=""});
+$("#refreshBtn").onclick=()=>{state.sheetIds={};loadAll()};
+$("#settingsBtn").onclick=()=>{state.view="settings";render()};
+
+/* ---------- boot ---------- */
+try{const s=JSON.parse(lsGet("solarays.calc")||"null");if(s)Object.assign(calcIn,s)}catch(e){}
+const sv=lsGet("solarays.view");if(sv&&VIEWS.some(x=>x[0]===sv))state.view=sv;
+if(location.hash&&VIEWS.some(x=>x[0]===location.hash.slice(1)))state.view=location.hash.slice(1);
+render();
+if(cfg.api&&cfg.key)loadAll();
+window.addEventListener("online",()=>{if(cfg.api&&cfg.key&&state.error)loadAll()});
+})();
+</script>
+</body>
+</html>
+
