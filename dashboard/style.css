@@ -202,14 +202,6 @@ main{justify-self:center;width:100%;max-width:1480px}
 .nextbox{margin-top:auto;background:var(--navy-soft);border:0;border-radius:12px;padding:10px 12px;text-align:left;display:flex;flex-direction:column;gap:2px}
 .nextbox span{font-size:11px;color:var(--faint)}
 .nextbox b{font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-/* Laptop and iPad landscape: the dashboard fills the window exactly, no scrolling */
-@media (min-width:1100px) and (min-height:680px){
-  main.full{height:100vh;height:100dvh;display:flex;flex-direction:column;padding-block:14px;overflow:hidden}
-  main.full .dash{flex:1;min-height:0;grid-template-rows:auto minmax(0,1fr) minmax(0,1fr)}
-  main.full .cbody.chart{min-height:0}
-  main.full .funnel{min-height:0}
-  main.full .donut svg{min-height:0}
-}
 /* iPad portrait and small laptops */
 @media (max-width:1099px){
   .dash{grid-template-columns:repeat(6,minmax(0,1fr))}
@@ -226,6 +218,66 @@ main{justify-self:center;width:100%;max-width:1480px}
   .card{min-height:0}
   .dash .k .v{font-size:20px}
   .period button{padding:7px 10px}
+}
+
+/* ---------- Fixed screens: Dashboard and Calculator on iPad landscape and laptops ----------
+   The page itself never scrolls or zooms; everything is sized to fit the window. */
+@media (min-width:1024px) and (min-height:600px){
+  html.lock{height:100%;overflow:hidden;overscroll-behavior:none;touch-action:pan-x pan-y}
+  html.lock body{position:fixed;inset:0;overflow:hidden;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+  html.lock .app{height:100%;min-height:0;grid-template-columns:200px minmax(0,1fr)}
+  html.lock .rail{height:100%;position:relative;top:0;overflow:hidden}
+  main.full{height:100%;max-width:none;display:flex;flex-direction:column;padding-block:14px;overflow:hidden}
+  main.full>.banner,main.full>.empty{margin-bottom:10px;flex:none}
+  main.full .dhead{flex:none;margin-bottom:10px}
+  main.full .dash{flex:1;min-height:0;gap:10px;grid-template-columns:repeat(12,minmax(0,1fr));grid-template-rows:auto minmax(0,1fr) minmax(0,1fr)}
+  main.full .dash .k{grid-column:span 2}
+  main.full .c-rev{grid-column:span 6}
+  main.full .c-type,main.full .c-pay,main.full .c-fun,main.full .c-kwp,main.full .c-town,main.full .c-pipe{grid-column:span 3}
+  main.full .card{min-height:0;padding:12px 14px;gap:6px}
+  main.full .cbody.chart{min-height:0}
+  main.full .funnel{min-height:0;gap:6px}
+  main.full .donut{gap:8px}
+  main.full .donut svg{min-height:0}
+  main.full .legend,main.full .slist{gap:4px}
+  main.full .pipe2{gap:8px}
+  main.full .hbars{gap:9px}
+  /* Calculator */
+  main.calcfull .top{flex:none;margin-bottom:12px}
+  main.calcfull .calc{flex:1;min-height:0;grid-template-columns:minmax(0,1fr) minmax(0,1.15fr);gap:14px}
+  main.calcfull .calc>.panel{min-height:0;overflow:hidden;padding:16px 18px;display:flex;flex-direction:column}
+  main.calcfull .form{gap:10px}
+  main.calcfull .f input,main.calcfull .f select{padding:9px 11px}
+  main.calcfull .f .hint{font-size:10.5px}
+  main.calcfull .result .big{gap:8px;margin-bottom:8px}
+  main.calcfull .result .big div{padding:10px 12px}
+  main.calcfull .result .big .v{font-size:21px;margin-top:2px}
+  main.calcfull .kv div{padding:6px 0;font-size:13px}
+  main.calcfull .kv div.tot span{font-size:16px}
+  main.calcfull .result h2{margin:10px 0 2px!important;font-size:15px}
+  main.calcfull .note{margin-top:8px;font-size:11px}
+  main.calcfull .actions{margin-top:auto;padding-top:10px}
+}
+@media (min-width:1024px) and (max-height:760px) and (min-height:600px){
+  main.full .dash .k{padding:10px 12px 6px}
+  main.full .dash .k .v{font-size:21px}
+  main.full .spark{height:24px;margin-top:4px}
+  main.full .lg,main.full .hb{font-size:11px}
+  main.full .donut svg{max-height:150px}
+  main.calcfull .kv div{padding:5px 0}
+  main.calcfull .f label{font-size:11px}
+}
+
+@media (min-width:1024px) and (max-height:690px) and (min-height:600px){
+  main.full{padding-block:10px}
+  main.full .fstep{padding:3px 8px}
+  main.full .fstep span{font-size:10px}
+  main.full .fstep b{font-size:13px}
+  main.calcfull .f .hint,main.calcfull .note{display:none}
+  main.calcfull .kv div{padding:4px 0}
+  main.calcfull .result .big div{padding:8px 10px}
+  main.calcfull .result .big .v{font-size:19px}
+  main.calcfull .top{margin-bottom:8px}
 }
 
 /* ---------- Photos ---------- */
