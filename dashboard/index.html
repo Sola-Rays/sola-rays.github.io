@@ -38,7 +38,6 @@ const DEFAULT_SHEET="1jQj_Or2LacAQaQfj39y7PnXWtNRmQzKSgijXe-3o2uA";
 const ICONS={
   home:'<path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/>',
   clients:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5c1.9.6 3.1 2.4 3.5 5.5"/>',
-  consult:'<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h5"/>',
   projects:'<path d="M3 9h18l-2 11H5z"/><path d="M3 9l3-5h12l3 5M9 13h6"/>',
   suppliers:'<rect x="3" y="7" width="13" height="11" rx="1"/><path d="M16 11h3l2 3v4h-5"/><circle cx="7" cy="19" r="1.8"/><circle cx="18" cy="19" r="1.8"/>',
   calc:'<rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M8 6.5h8v3H8zM8.5 13h.01M12 13h.01M15.5 13h.01M8.5 17h.01M12 17h.01M15.5 17h.01"/>'
@@ -54,22 +53,22 @@ const TABS={
   ["DU","Utility","text"],
   ["Type","Type","select",["Residence","Business","Under Construction - Business","Under Construction - Residence","Farm","Government"]],
   ["kWh","Monthly kWh","number"],["Amount","Monthly bill (₱)","number"],["Rate per kWh","Rate per kWh (₱)","number"],
-  ["Consulted (Y/N)","Consulted","select",["Yes","No"]],["Consultation Date","Consultation date","date"],["Notes","Notes","textarea"]]},
+  ["Consulted (Y/N)","Consulted","select",["Yes","No"]],["Consultation Date","Consultation date","date"],["Notes","Notes","textarea"],["Photos","Photos","photos"]]},
  Projects:{sheet:"Projects",key:"projects",title:"Project",idField:"ID",idMode:"prefix",prefix:"PR",filterField:"Status",fields:[
   ["ID","ID","hidden"],["Client","Client","client"],["System (kWp)","System (kWp)","number"],["Panels","Panels","text"],
-  ["Inverter","Inverter","text"],["Battery","Battery","text"],["Contract Price","Contract price (₱)","number"],
+  ["Inverter","Inverter","text"],["Battery","Battery","text"],["Contract Price","Contract price (₱)","number"],["Contract Date","Contract date","date"],
   ["Payment","Payment","select",["Cash","GSIS loan"]],["Amount Received","Amount received (₱)","number"],
   ["Status","Status","select",["Downpayment","Ordering","Scheduled","Installing","Awaiting loan release","Completed"]],
-  ["Start Date","Start date","date"],["Completion Date","Completion date","date"],["Notes","Notes","textarea"]]},
+  ["Start Date","Start date","date"],["Completion Date","Completion date","date"],["Notes","Notes","textarea"],["Photos","Photos","photos"]]},
  Suppliers:{sheet:"Suppliers",key:"suppliers",title:"Supplier item",idField:null,filterField:"Item",filterOpts:["PV Module","Inverter","Battery","Accessories"],fields:[
   ["Supplier","Supplier","text"],["Item","Category","select",["PV Module","Inverter","Battery","Accessories"]],
-  ["Brand","Brand","text"],["Specs / Description","Specs / description","textarea"],["SRP","Price (₱)","number"]]}
+  ["Brand","Brand","text"],["Specs / Description","Specs / description","textarea"],["SRP","Price (₱)","number"],["Photos","Photos","photos"]]}
 };
 Object.values(TABS).forEach(t=>{if(!t.filterOpts)t.filterOpts=t.fields.find(f=>f[0]===t.filterField)[3]});
 
 const state={view:"home",sheetId:null,data:{Clients:[],Projects:[],Suppliers:[]},heads:{},loaded:false,
   filter:{clients:"All",projects:"All",suppliers:"All"},q:{clients:"",projects:"",suppliers:""},
-  error:null,sheetIds:{}};
+  error:null,sheetIds:{},period:"12"};
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -182,12 +181,15 @@ function render(){
   renderNav();
   const m=$("#main");
   if(!cfg.api||!cfg.key)state.view="settings";
-  if(state.view==="settings"){m.innerHTML=settingsView();bindSettings();return}
+  if(state.view==="settings"){m.className="";m.innerHTML=settingsView();bindSettings();return}
   const banner=state.error?`<div class="banner"><span>${esc(errMsg(state.error))}</span><span class="row"><button class="btn ghost" type="button" data-act="refresh">Try again</button></span></div>`:"";
   const loading=!state.loaded&&!state.error?`<div class="empty" style="margin-bottom:16px">Loading your Google Sheet…</div>`:"";
   const v={home:homeView,clients:()=>listView("Clients"),projects:()=>listView("Projects"),suppliers:()=>listView("Suppliers"),calc:calcView}[state.view];
+  CHARTS={};chartSeq=0;
+  m.className=state.view==="home"?"full":"";
   m.innerHTML=banner+loading+v();
   if(state.view==="calc")bindCalc();
+  if(state.view==="home")requestAnimationFrame(drawCharts);
 }
 function header(title,sub,actions=""){
   return `<div class="top"><div><h1>${title}</h1><div class="sub">${sub}</div></div><div class="row">${actions}</div></div>`;
@@ -217,64 +219,171 @@ function bindSettings(){
   };
 }
 
-const SVG=k=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${k}</svg>`;
-const KICON={
-  clients:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c.8-3.6 3.4-5.5 6.5-5.5s5.7 1.9 6.5 5.5M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5c1.9.6 3.1 2.4 3.5 5.5"/>',
-  projects:'<path d="M3 9h18l-2 11H5z"/><path d="M3 9l3-5h12l3 5M9 13h6"/>',
-  peso:'<path d="M7 20V4h6a4 4 0 0 1 0 8H7M4 8h15M4 11h15"/>',
-  done:'<circle cx="12" cy="12" r="9"/><path d="M8 12.5l2.7 2.7L16 9.8"/>'
-};
-const initials=n=>String(n||"?").replace(/\(.*?\)/g,"").split(/\s+/).filter(w=>/^[A-Za-zÑñ]/.test(w)).slice(0,2).map(w=>w[0].toUpperCase()).join("")||"?";
-function personHTML(c,i,withDate){
-  const iso=toISO(c["Consultation Date"]);
-  const left=withDate&&iso?`<div class="datechip"><div class="mo">${MON[+iso.slice(5,7)-1].toUpperCase()}</div><div class="dy">${+iso.slice(8,10)}</div></div>`:`<div class="av ${i===0?"y":""}">${esc(initials(c.Client))}</div>`;
-  const d=[String(c.Address||"").split(",")[0],c.DU,c.kWh?num(c.kWh)+" kWh/mo":"",c.Type].filter(Boolean).join(" · ");
-  return `<button type="button" class="person" data-edit="Clients" data-row="${c._row}">${left}<div class="m"><div class="t">${esc(c.Client||"Unnamed")}</div><div class="d">${esc(d)}</div></div><div class="r">${c.Amount?`<span class="amt">${peso(c.Amount)}</span><span class="sub">per month</span>`:""}</div></button>`;
+/* ---------- dashboard home: charts ---------- */
+const COL={sol:"#FFB612",blue:"#6CB4FF",sky:"#8CC4FF",green:"#4FD18B",coral:"#FF7A59",lav:"#B9A6FF",slate:"#5E7590",grid:"#2B3D52",muted:"#8FA1B7"};
+let CHARTS={},chartSeq=0;
+const chartSlot=(fn,label)=>{const id="ch"+(++chartSeq);CHARTS[id]=fn;return `<div class="cbody chart" data-chart="${id}" role="img" aria-label="${esc(label)}"></div>`};
+function drawCharts(){
+  document.querySelectorAll("[data-chart]").forEach(el=>{
+    const fn=CHARTS[el.dataset.chart];if(!fn)return;
+    const w=Math.floor(el.clientWidth),h=Math.floor(el.clientHeight);if(w<40||h<40)return;
+    el.innerHTML=fn(w,h);
+  });
 }
-function jobHTML(p){
-  const price=num(p["Contract Price"]),paid=num(p["Amount Received"]);const pct=price?Math.min(100,Math.round(paid/price*100)):0;
-  return `<button type="button" class="job" data-edit="Projects" data-row="${p._row}"><div class="row2"><span class="t">${esc(p.Client||"No client")}</span>${pill(p.Status)}</div><div class="d">${esc([p["System (kWp)"]?p["System (kWp)"]+" kWp":"",p.Inverter,p.Payment].filter(Boolean).join(" · "))}</div><div class="row2"><span class="amt">${peso(price)}</span><span class="sub">${pct>=100?"Fully paid":peso(paid)+" · "+pct+"%"}</span></div><div class="prog"><div class="${pct>=100?"full":""}" style="width:${pct}%"></div></div></button>`;
+const shortPeso=v=>{v=Math.round(v);const a=Math.abs(v);return a>=1e6?"₱"+(v/1e6).toFixed(a>=1e7?1:2).replace(/\.?0+$/,"")+"M":a>=1e3?"₱"+Math.round(v/1e3)+"k":"₱"+v};
+function niceMax(v){if(!(v>0))return 1;const p=Math.pow(10,Math.floor(Math.log10(v)));for(const m of [1,1.2,1.5,2,2.5,3,4,5,6,8,10])if(m*p>=v)return m*p;return 10*p}
+const isoOf=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+
+function buckets(per,dates){
+  const now=new Date();const keys=[],labels=[];let keyOf,start,prevStart;
+  if(per==="30"){
+    for(let i=29;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth(),now.getDate()-i);keys.push(isoOf(d));labels.push(d.getDate()===1||i===29?MON[d.getMonth()]+" "+d.getDate():String(d.getDate()))}
+    keyOf=iso=>iso;start=keys[0];prevStart=isoOf(new Date(now.getFullYear(),now.getMonth(),now.getDate()-59));
+  }else if(per==="12"){
+    for(let i=11;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);keys.push(`${d.getFullYear()}-${pad(d.getMonth()+1)}`);labels.push(MON[d.getMonth()])}
+    keyOf=iso=>iso.slice(0,7);start=keys[0]+"-01";const p=new Date(now.getFullYear(),now.getMonth()-23,1);prevStart=isoOf(p);
+  }else{
+    const valid=dates.filter(Boolean).sort();
+    const first=valid.length?new Date(+valid[0].slice(0,4),+valid[0].slice(5,7)-1,1):new Date(now.getFullYear(),now.getMonth()-11,1);
+    const months=(now.getFullYear()-first.getFullYear())*12+now.getMonth()-first.getMonth()+1;
+    if(months>24){for(let y=first.getFullYear();y<=now.getFullYear();y++){keys.push(String(y));labels.push(String(y))}keyOf=iso=>iso.slice(0,4)}
+    else{const n=Math.max(months,6);for(let i=n-1;i>=0;i--){const d=new Date(now.getFullYear(),now.getMonth()-i,1);keys.push(`${d.getFullYear()}-${pad(d.getMonth()+1)}`);labels.push(MON[d.getMonth()]+(d.getMonth()===0?" "+String(d.getFullYear()).slice(2):""))}keyOf=iso=>iso.slice(0,7)}
+    start="0000-00-00";prevStart=null;
+  }
+  return {keys,labels,keyOf,start,prevStart,end:today()};
 }
+function series(B,items,dateOf,valOf){
+  const idx=new Map(B.keys.map((k,i)=>[k,i]));const out=B.keys.map(()=>0);
+  items.forEach(it=>{const iso=dateOf(it);if(!iso||iso<B.start||iso>B.end)return;const i=idx.get(B.keyOf(iso));if(i!=null)out[i]+=valOf(it)});
+  return out;
+}
+const cumulate=a=>{let s=0;return a.map(v=>s+=v)};
+
+function spark(vals,color){
+  if(vals.length<2)vals=[vals[0]||0,vals[0]||0];
+  const w=100,h=30,mx=Math.max(...vals),mn=Math.min(...vals),rg=mx-mn||1;
+  const pts=vals.map((v,i)=>[i*w/(vals.length-1),h-3-(v-mn)/rg*(h-7)]);
+  const line=pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ");
+  const [lx,ly]=pts[pts.length-1];
+  return `<svg class="spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path d="M0,${h} L${line.replace(/ /g," L")} L${w},${h} Z" fill="${color}" fill-opacity=".16"></path><polyline points="${line}" fill="none" stroke="${color}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"></polyline><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.4" fill="${color}" vector-effect="non-scaling-stroke"></circle></svg>`;
+}
+
+/* Bars with an optional line. o: {labels,bars,line,barColor,lineColor,fmt,lineFmt,lineOwnScale,callout} */
+function barLine(o){
+  return (w,h)=>{
+    const fs=11,L=o.lineOwnScale?30:48,R=o.lineOwnScale?40:12,T=26,Bm=22;
+    const pw=Math.max(10,w-L-R),phh=Math.max(10,h-T-Bm),n=o.labels.length,step=pw/n;
+    const bmax=niceMax(Math.max(...o.bars,...(o.line&&!o.lineOwnScale?o.line:[0])));
+    const lmax=o.lineOwnScale?niceMax(Math.max(...o.line)):bmax;
+    const y=(v,m)=>T+phh-(v/m)*phh;let s="";
+    for(let i=0;i<=4;i++){const v=bmax*i/4,yy=y(v,bmax);s+=`<line x1="${L}" x2="${L+pw}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}" stroke="${COL.grid}"></line><text x="${L-6}" y="${(yy+3.5).toFixed(1)}" text-anchor="end" font-size="${fs-1}" fill="${COL.muted}">${i?o.fmt(v):"0"}</text>`}
+    const every=Math.max(1,Math.ceil(n/(pw/36)));
+    o.bars.forEach((v,i)=>{const bw=Math.min(step*.62,46),x=L+i*step+(step-bw)/2,yy=y(v,bmax);
+      if(v>0)s+=`<rect x="${x.toFixed(1)}" y="${yy.toFixed(1)}" width="${bw.toFixed(1)}" height="${(T+phh-yy).toFixed(1)}" rx="${Math.min(4,bw/4).toFixed(1)}" fill="${o.barColor}" fill-opacity="${i===n-1?1:.82}"></rect>`;
+      if(i%every===0||i===n-1)s+=`<text x="${(L+i*step+step/2).toFixed(1)}" y="${h-6}" text-anchor="middle" font-size="${fs-1}" fill="${COL.muted}">${esc(o.labels[i])}</text>`});
+    if(o.line){
+      const pts=o.line.map((v,i)=>[L+i*step+step/2,y(v,lmax)]);
+      if(o.lineOwnScale){[0,lmax/2,lmax].forEach(v=>{s+=`<text x="${L+pw+6}" y="${(y(v,lmax)+3.5).toFixed(1)}" font-size="${fs-1}" fill="${o.lineColor}">${o.fmt(v)}</text>`});
+        s+=`<path d="M${pts[0][0].toFixed(1)},${T+phh} L${pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" L")} L${pts[pts.length-1][0].toFixed(1)},${T+phh} Z" fill="${o.lineColor}" fill-opacity=".10"></path>`}
+      s+=`<polyline points="${pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ")}" fill="none" stroke="${o.lineColor}" stroke-width="2.4" stroke-linejoin="round"></polyline>`;
+      if(n<=31&&!o.lineOwnScale)s+=pts.map(p=>`<circle cx="${p[0].toFixed(1)}" cy="${p[1].toFixed(1)}" r="3" fill="#16212E" stroke="${o.lineColor}" stroke-width="2"></circle>`).join("");
+      const [lx,ly]=pts[pts.length-1],lv=o.line[o.line.length-1];
+      if(lv>0){const txt=(o.lineFmt||o.fmt)(lv),tw=txt.length*7+14,bx=Math.min(Math.max(lx-tw/2,L),L+pw-tw),by=Math.max(ly-28,2);
+        s+=`<circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="3.6" fill="${o.lineColor}"></circle><rect x="${bx.toFixed(1)}" y="${by.toFixed(1)}" width="${tw}" height="20" rx="6" fill="${o.lineColor}"></rect><text x="${(bx+tw/2).toFixed(1)}" y="${(by+14).toFixed(1)}" text-anchor="middle" font-size="11" font-weight="700" fill="#16212E">${esc(txt)}</text>`}
+    }
+    const empty=!o.bars.some(v=>v>0)&&!(o.line||[]).some(v=>v>0);
+    if(empty)s+=`<text x="${L+pw/2}" y="${T+phh/2}" text-anchor="middle" font-size="13" fill="${COL.muted}">${esc(o.emptyText||"No data for this period yet")}</text>`;
+    return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" font-family="Inter, system-ui, sans-serif">${s}</svg>`;
+  };
+}
+function donutHTML(parts,big,small){
+  const tot=parts.reduce((a,p)=>a+p[1],0),r=56,c=2*Math.PI*r;let off=0,segs="";
+  if(tot)parts.forEach(([n,v,col])=>{if(!v)return;const L=c*v/tot;segs+=`<circle cx="80" cy="80" r="${r}" fill="none" stroke="${col}" stroke-width="22" stroke-dasharray="${Math.max(L-(parts.filter(p=>p[1]).length>1?2.5:0),0).toFixed(2)} ${c.toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 80 80)"></circle>`;off+=L});
+  const leg=parts.map(([n,v,col])=>`<div class="lg"><i style="background:${col}"></i><span>${esc(n)}</span><b>${v}</b><em>${tot?Math.round(v/tot*100):0}%</em></div>`).join("");
+  return `<div class="cbody donut"><svg viewBox="0 0 160 160" role="img" aria-label="${esc(small)}"><circle cx="80" cy="80" r="${r}" fill="none" stroke="#26374B" stroke-width="22"></circle>${segs}<text x="80" y="84" text-anchor="middle" font-size="28" font-weight="800" fill="#fff" font-family="Inter, sans-serif">${big}</text><text x="80" y="103" text-anchor="middle" font-size="11" fill="${COL.muted}" font-family="Inter, sans-serif">${esc(small)}</text></svg><div class="legend">${leg}</div></div>`;
+}
+const legendHTML=items=>`<div class="ckey">${items.map(([c,t])=>`<span><i style="background:${c}"></i>${esc(t)}</span>`).join("")}</div>`;
+const townOf=c=>{const parts=String(c.Address||"").split(",").map(s=>s.trim()).filter(Boolean);if(!parts.length)return "";if(parts.length>=3)return parts[parts.length-2];if(parts.length===2)return /davao|oro|norte|sur|province/i.test(parts[1])?parts[0]:parts[1];return parts[0]};
+const typeGroup=t=>{t=String(t||"");if(/under construction/i.test(t))return "Under construction";if(/^residen/i.test(t))return "Residence";if(/^business/i.test(t))return "Business";return t?"Other":"Not set"};
+
 function homeView(){
-  const {Clients,Projects}=state.data;const t=today();
-  const cd=c=>toISO(c["Consultation Date"]);
-  const consulted=Clients.filter(c=>c["Consulted (Y/N)"]==="Yes");
-  const waiting=Clients.filter(c=>c["Consulted (Y/N)"]!=="Yes");
-  const thisMonth=consulted.filter(c=>cd(c).slice(0,7)===t.slice(0,7)).length;
-  const recent=[...consulted].sort((a,b)=>cd(b).localeCompare(cd(a))).slice(0,4);
+  const {Clients,Projects}=state.data;const t=today();const per=state.period;
+  const pDate=p=>toISO(p["Contract Date"])||toISO(p["Start Date"]);
+  const cDate=p=>toISO(p["Completion Date"]);
+  const vDate=c=>toISO(c["Consultation Date"]);
+  const B=buckets(per,[...Projects.map(pDate),...Projects.map(cDate),...Clients.map(vDate)]);
+  const inR=iso=>iso&&iso>=B.start&&iso<=t;
+  const inPrev=iso=>B.prevStart&&iso&&iso>=B.prevStart&&iso<B.start;
+  const perLabel={"30":"last 30 days","12":"last 12 months","all":"all time"}[per];
+
+  const signed=series(B,Projects,pDate,p=>num(p["Contract Price"]));
+  const collected=series(B,Projects,pDate,p=>num(p["Amount Received"]));
+  const done=Projects.filter(p=>p.Status==="Completed");
+  const kwpSeries=series(B,done,cDate,p=>num(p["System (kWp)"]));
+  const kwpCum=cumulate(kwpSeries);
+  const visits=series(B,Clients.filter(c=>c["Consulted (Y/N)"]==="Yes"),vDate,()=>1);
+  const started=series(B,Projects,pDate,()=>1);
+
   const active=Projects.filter(p=>p.Status!=="Completed");
   const pipeline=active.reduce((s,p)=>s+num(p["Contract Price"]),0);
   const collect=active.reduce((s,p)=>s+Math.max(0,num(p["Contract Price"])-num(p["Amount Received"])),0);
-  const stages=["Downpayment","Ordering","Scheduled","Installing","Awaiting loan release"];
-  const maxN=Math.max(1,...stages.map(s=>active.filter(p=>p.Status===s).length));
+  const projIn=Projects.filter(p=>inR(pDate(p)));
+  const revenue=projIn.reduce((s,p)=>s+num(p["Contract Price"]),0);
+  const prevRev=Projects.filter(p=>inPrev(pDate(p))).reduce((s,p)=>s+num(p["Contract Price"]),0);
+  const recv=projIn.reduce((s,p)=>s+num(p["Amount Received"]),0);
+  const rate=revenue?Math.round(recv/revenue*100):null;
+  const doneIn=done.filter(p=>inR(cDate(p)));
+  const kwpIn=doneIn.reduce((s,p)=>s+num(p["System (kWp)"]),0);
+  const consulted=Clients.filter(c=>c["Consulted (Y/N)"]==="Yes");
+  const consultedIn=consulted.filter(c=>inR(vDate(c))).length;
+  const owed=cumulate(signed.map((v,i)=>v-collected[i]));
+  const rateSeries=(()=>{const a=cumulate(signed),b=cumulate(collected);return a.map((v,i)=>v?b[i]/v*100:0)})();
+  const revDelta=B.prevStart&&prevRev?Math.round((revenue-prevRev)/prevRev*100):null;
+
+  const kpi=(l,v,h,hc,vals,col,vcls="")=>`<div class="kpi k"><div class="l">${l}</div><div class="v ${vcls}">${v}</div><div class="h" style="${hc?"color:"+hc:""}">${h}</div>${spark(vals,col)}</div>`;
+
+  const types=["Residence","Business","Under construction","Other","Not set"].map((n,i)=>[n,Clients.filter(c=>typeGroup(c.Type)===n).length,[COL.sol,COL.blue,COL.lav,COL.green,COL.slate][i]]).filter(p=>p[1]||["Residence","Business","Under construction"].includes(p[0]));
+  const pays=[["Cash",Projects.filter(p=>p.Payment==="Cash").length,COL.green],["GSIS loan",Projects.filter(p=>p.Payment==="GSIS loan").length,COL.coral]];
+  const noPay=Projects.length-pays[0][1]-pays[1][1];if(noPay)pays.push(["Not set",noPay,COL.slate]);
+
+  const fun=[["Clients",Clients.length,COL.blue],["Consulted",consulted.length,COL.sky],["Projects",Projects.length,COL.sol],["Completed",done.length,COL.green]];
+  const funMax=Math.max(1,fun[0][1]);
+  const funnel=`<div class="cbody funnel">${fun.map(([n,v,c],i)=>{const pct=i&&fun[i-1][1]?Math.round(v/fun[i-1][1]*100):null;return `<div class="fstep" style="width:${Math.max(34,v/funMax*100).toFixed(0)}%;background:${c}"><span>${n}</span><b>${v}${pct!=null?" · "+pct+"%":""}</b></div>`}).join("")}</div>`;
+
+  const tcount={};Clients.forEach(c=>{const tw=townOf(c);if(tw)tcount[tw]=(tcount[tw]||0)+1});
+  const towns=Object.entries(tcount).sort((a,b)=>b[1]-a[1]).slice(0,7);const tmax=Math.max(1,...towns.map(x=>x[1]));
+  const townsHTML=towns.length?`<div class="cbody hbars">${towns.map(([n,v],i)=>`<div class="hb"><span>${esc(n)}</span><div><i style="width:${(v/tmax*100).toFixed(0)}%;background:${i?COL.blue:COL.sol}"></i></div><b>${v}</b></div>`).join("")}</div>`:`<div class="cbody"><div class="empty">Add addresses like "Poblacion, Monkayo, Davao de Oro" and towns show here.</div></div>`;
+
+  const stages=[["Downpayment",COL.coral],["Ordering",COL.lav],["Scheduled",COL.blue],["Installing",COL.sol],["Awaiting loan release",COL.green]].map(([n,c])=>[n,active.filter(p=>p.Status===n).length,c]);
+  const next=active.filter(p=>toISO(p["Start Date"])>=t).sort((a,b)=>toISO(a["Start Date"]).localeCompare(toISO(b["Start Date"])))[0];
+  const pipeHTML=`<div class="cbody pipe2"><div class="stackbar">${active.length?stages.filter(s=>s[1]).map(([n,v,c])=>`<i style="flex:${v};background:${c}" title="${n}: ${v}"></i>`).join(""):'<i style="flex:1;background:#26374B"></i>'}</div>
+    <div class="slist">${stages.map(([n,v,c])=>`<div class="lg"><i style="background:${c}"></i><span>${n==="Awaiting loan release"?"Loan release":n}</span><b>${v}</b></div>`).join("")}</div>
+    <button type="button" class="nextbox" ${next?`data-edit="Projects" data-row="${next._row}"`:'data-view="projects"'}><span>Next install</span><b>${next?esc(next.Client||"Project")+" · "+fmtDate(next["Start Date"]).replace(/, \d{4}$/,""):"None scheduled"}</b></button></div>`;
+
   const hr=new Date().getHours();const greet=hr<12?"Good morning":hr<18?"Good afternoon":"Good evening";
-  const date=new Date().toLocaleDateString("en-PH",{weekday:"long",month:"long",day:"numeric"});
-  const waitItem=c=>{
-    const d=[String(c.Address||"").split(",")[0],c.DU,c.kWh?num(c.kWh)+" kWh/mo":"",c.Phone].filter(Boolean).join(" · ")||"No details yet";
-    return `<button type="button" class="item" data-edit="Clients" data-row="${c._row}"><div class="m"><div class="t">${esc(c.Client||"Unnamed")}</div><div class="d">${esc(d)}</div></div><div class="r">${c.Type?`<span class="pill warn">${esc(c.Type)}</span>`:""}${c.Amount?`<span class="amt">${peso(c.Amount)}</span>`:""}</div></button>`;
-  };
-  const visit=c=>{
-    const iso=cd(c);
-    const d=[String(c.Address||"").split(",")[0],c.kWh?num(c.kWh)+" kWh/mo":"",c.DU].filter(Boolean).join(" · ");
-    return `<button type="button" class="visit" data-edit="Clients" data-row="${c._row}"><div class="datechip">${iso?`<div class="mo">${MON[+iso.slice(5,7)-1].toUpperCase()}</div><div class="dy">${+iso.slice(8,10)}</div>`:'<div class="dy">–</div>'}</div><div class="m"><div class="t">${esc(c.Client||"Unnamed")}</div><div class="d">${esc(d)}</div></div>${c.Amount?`<span class="amt">${peso(c.Amount)}</span>`:""}</button>`;
-  };
-  return `<div class="top"><div><div class="mbrand"><span class="s">Sola</span>Rays</div><h1>${greet}, Raymund</h1><div class="sub">${date}</div></div>
-    <div class="row"><button class="btn ghost" type="button" data-new="Projects">+ Project</button><button class="btn" type="button" data-new="Clients">+ Client</button></div></div>
-  <div class="kpis4">
-    <div class="kpi"><div class="l">Active projects</div><div class="v">${active.length}</div><div class="h">${peso(pipeline)} contract value</div></div>
-    <div class="kpi"><div class="l">To collect</div><div class="v y">${peso(collect)}</div><div class="h">Balance on active jobs</div></div>
-    <div class="kpi"><div class="l">Not yet consulted</div><div class="v" style="color:${waiting.length?"var(--bad)":"var(--text)"}">${waiting.length}</div><div class="h">Clients waiting for a visit</div></div>
-    <div class="kpi"><div class="l">Clients</div><div class="v">${Clients.length}</div><div class="h">${consulted.length} consulted · ${thisMonth} this month</div></div>
-  </div>
-  <div class="homegrid">
-    <div class="panel tall"><div class="hd"><h2>Not yet consulted</h2>${waiting.length?`<span class="flag">${waiting.length} waiting</span>`:""}</div>
-      <div class="list">${waiting.length?waiting.slice(0,6).map(waitItem).join(""):'<div class="empty">Every client has been consulted. New clients you add show here until their visit.</div>'}</div></div>
-    <div class="stack">
-      <div class="panel"><div class="hd"><h2>Installation pipeline</h2><span class="sub">${active.length} active job${active.length===1?"":"s"}</span></div>
-        <div class="pipe">${stages.map(s=>{const n=active.filter(p=>p.Status===s).length;return `<div class="bar"><span>${s}</span><div class="track"><div class="fill" style="width:${n/maxN*100}%"></div></div><span class="n">${n}</span></div>`}).join("")}</div></div>
-      <div class="panel tall"><div class="hd"><h2>Latest consultations</h2><button class="btn ghost" type="button" data-view="clients">All</button></div>
-        <div class="visits">${recent.length?recent.map(visit).join(""):'<div class="empty">No consulted clients yet.</div>'}</div></div>
-    </div>
+  const date=new Date().toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"});
+  const seg=[["30","30 days"],["12","12 months"],["all","All time"]].map(([k,l])=>`<button type="button" data-period="${k}" aria-pressed="${per===k}">${l}</button>`).join("");
+
+  return `<div class="dhead"><div class="dh-l"><div class="mbrand"><span class="s">Sola</span>Rays</div><h1>${greet}, Raymund</h1><span class="sub">${date}</span></div>
+    <div class="row"><div class="period" role="group" aria-label="Period">${seg}</div><button class="btn ghost" type="button" data-new="Projects">+ Project</button><button class="btn" type="button" data-new="Clients">+ Client</button></div></div>
+  <div class="dash">
+    ${kpi("Clients",Clients.length,`${consultedIn} consulted, ${perLabel}`,COL.green,cumulate(visits),COL.blue)}
+    ${kpi("Active projects",active.length,`${shortPeso(pipeline)} contract value`,"",started,COL.sol)}
+    ${kpi("To collect",peso(collect),"Balance on active jobs","",owed,COL.sol,"y")}
+    ${kpi(per==="all"?"Revenue, all time":per==="30"?"Revenue, 30 days":"Revenue, 12 mo",shortPeso(revenue),revDelta==null?"Contract value signed":(revDelta>=0?"+":"")+revDelta+"% vs prior period",revDelta==null?"":revDelta>=0?COL.green:COL.coral,signed,COL.green)}
+    ${kpi("kWp installed",(Math.round(kwpIn*10)/10).toLocaleString("en-PH"),`${doneIn.length} system${doneIn.length===1?"":"s"} completed`,"",kwpCum,COL.lav)}
+    ${kpi("Collection rate",rate==null?"–":rate+"%","Collected vs contract",rate!=null&&rate>=80?COL.green:"",rateSeries,COL.coral)}
+    <section class="card c-rev"><div class="ch"><h2>Contracts vs collections</h2><span>${perLabel[0].toUpperCase()+perLabel.slice(1)} · ₱</span></div>
+      ${legendHTML([[COL.sol,"Contracts signed"],[COL.blue,"Collected"]])}
+      ${chartSlot(barLine({labels:B.labels,bars:signed,line:collected,barColor:COL.sol,lineColor:COL.blue,fmt:shortPeso,emptyText:"Add projects with a contract date to see this chart"}),"Contracts signed and amounts collected, "+perLabel)}</section>
+    <section class="card c-type"><div class="ch"><h2>Clients by type</h2><span>CRM tab</span></div>${donutHTML(types,Clients.length,"clients")}</section>
+    <section class="card c-pay"><div class="ch"><h2>Payment mix</h2><span>All projects</span></div>${donutHTML(pays,Projects.length,"projects")}</section>
+    <section class="card c-fun"><div class="ch"><h2>Client funnel</h2><span>Conversion</span></div>${funnel}</section>
+    <section class="card c-kwp"><div class="ch"><h2>kWp installed</h2><span>Completed systems</span></div>
+      ${legendHTML([[COL.lav,"kWp per period"],[COL.sol,"Running total"]])}
+      ${chartSlot(barLine({labels:B.labels,bars:kwpSeries,line:kwpCum,barColor:COL.lav,lineColor:COL.sol,fmt:v=>String(Math.round(v*10)/10),lineFmt:v=>(Math.round(v*10)/10)+" kWp",lineOwnScale:true,emptyText:"Completed projects show here"}),"kWp installed per period with running total")}</section>
+    <section class="card c-town"><div class="ch"><h2>Top towns</h2><span>Clients</span></div>${townsHTML}</section>
+    <section class="card c-pipe"><div class="ch"><h2>Installation pipeline</h2><span>${active.length} active</span></div>${pipeHTML}</section>
   </div>`;
 }
 
@@ -283,7 +392,8 @@ function itemHTML(name,r){
   if(name==="Clients"){t=r.Client||"Unnamed";d=[r.Address,r.Phone,r.DU,r.kWh?num(r.kWh)+" kWh/mo":""].filter(Boolean).join(" · ");right=pill(r["Consulted (Y/N)"]==="Yes"?"Consulted":"")+(r.Amount?`<span class="amt">${peso(r.Amount)}/mo</span>`:"")+(r.Type?`<span class="sub">${esc(r.Type)}</span>`:"")}
   if(name==="Projects"){const bal=num(r["Contract Price"])-num(r["Amount Received"]);t=r.Client||"No client";d=[r["System (kWp)"]?r["System (kWp)"]+" kWp":"",r.Inverter,r.Payment].filter(Boolean).join(" · ");right=pill(r.Status)+`<span class="amt">${peso(r["Contract Price"])}</span>${bal>0?`<span class="sub">Bal ${peso(bal)}</span>`:""}`}
   if(name==="Suppliers"){t=[r.Brand&&r.Brand!=="-"?r.Brand:"",String(r["Specs / Description"]).split(",")[0]].filter(Boolean).join(" · ")||"Item";d=[r.Supplier,r["Specs / Description"]].filter(Boolean).join(" · ");right=`<span class="amt">${peso(r.SRP)}</span><span class="pill">${esc(r.Item)}</span>`}
-  return `<button type="button" class="item" data-edit="${name}" data-row="${r._row}"><div class="m"><div class="t">${esc(t)}</div><div class="d">${esc(d)}</div></div><div class="r">${right}</div></button>`;
+  const pc=photoIds(r.Photos).length;
+  return `<button type="button" class="item" data-edit="${name}" data-row="${r._row}"><div class="m"><div class="t">${esc(t)}</div><div class="d">${esc(d)}</div></div>${pc?`<span class="pcount" title="${pc} photo${pc>1?"s":""}">${CAM}${pc}</span>`:""}<div class="r">${right}</div></button>`;
 }
 
 function listView(name){
@@ -300,6 +410,39 @@ function listView(name){
    <div class="list">${rows.length?rows.map(r=>itemHTML(name,r)).join(""):`<div class="empty">${all.length?"Nothing matches this search or filter.":`No ${name.toLowerCase()} yet. Tap Add to create the first one; it is saved to the ${t.sheet} tab of your sheet.`}</div>`}</div>`;
 }
 
+/* ---------- photos (saved to Google Drive by the Apps Script) ---------- */
+const photoCache={};
+const photoIds=v=>String(v||"").split(/[\s,;]+/).filter(x=>/^[A-Za-z0-9_-]{10,}$/.test(x));
+const CAM='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>';
+function photoURL(id){
+  if(photoCache[id])return photoCache[id];
+  const p=api({action:"photo",id}).then(j=>{
+    const bin=atob(j.data);const arr=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);
+    return URL.createObjectURL(new Blob([arr],{type:j.mime||"image/jpeg"}));
+  });
+  photoCache[id]=p;p.catch(()=>{delete photoCache[id]});return p;
+}
+async function shrinkPhoto(file){
+  const url=URL.createObjectURL(file);
+  try{
+    const img=await new Promise((res,rej)=>{const i=new Image();i.onload=()=>res(i);i.onerror=()=>rej({code:"bad_image",message:"That file couldn't be opened as a photo."});i.src=url});
+    const max=1600,s=Math.min(1,max/Math.max(img.naturalWidth,img.naturalHeight));
+    const w=Math.max(1,Math.round(img.naturalWidth*s)),h=Math.max(1,Math.round(img.naturalHeight*s));
+    const c=document.createElement("canvas");c.width=w;c.height=h;
+    const ctx=c.getContext("2d");ctx.fillStyle="#fff";ctx.fillRect(0,0,w,h);ctx.drawImage(img,0,0,w,h);
+    const d=c.toDataURL("image/jpeg",0.82);
+    return {data:d.slice(d.indexOf(",")+1),mime:"image/jpeg",name:String(file.name||"photo").replace(/\.[^.]+$/,"").slice(0,60)+".jpg"};
+  }finally{URL.revokeObjectURL(url)}
+}
+function openViewer(id){
+  const v=document.createElement("div");v.className="viewer";v.setAttribute("role","dialog");v.setAttribute("aria-label","Photo");
+  v.innerHTML=`<div class="vimg"><div class="empty">Loading photo…</div></div><div class="row"><a class="btn ghost" href="https://drive.google.com/file/d/${esc(id)}/view" target="_blank" rel="noopener">Open in Google Drive</a><button class="btn" type="button" data-vclose>Close</button></div>`;
+  document.body.appendChild(v);
+  v.addEventListener("click",e=>{if(e.target===v||e.target.closest("[data-vclose]"))v.remove()});
+  photoURL(id).then(u=>{v.querySelector(".vimg").innerHTML=`<img src="${u}" alt="Photo">`}).catch(e=>{v.querySelector(".vimg").innerHTML=`<div class="empty">${esc(errMsg(e))}</div>`});
+}
+let closeModal=null;
+
 /* ---------- modal form ---------- */
 function openForm(name,rec,prefill){
   const t=TABS[name];const isNew=!rec;const r=rec?{...rec}:{...prefill};
@@ -307,12 +450,14 @@ function openForm(name,rec,prefill){
     if(t.idMode==="serial")r[t.idField]=Math.max(0,...state.data[name].map(x=>num(x[t.idField])))+1;
     if(t.idMode==="prefix")r[t.idField]=t.prefix+"-"+Date.now().toString(36).toUpperCase();
     if(name==="Clients"){r["Consulted (Y/N)"]=r["Consulted (Y/N)"]||"No"}
-    if(name==="Projects")r.Status=r.Status||"Downpayment";
+    if(name==="Projects"){r.Status=r.Status||"Downpayment";r["Contract Date"]=r["Contract Date"]||today()}
   }
+  const ph={ids:photoIds(r.Photos),added:[],removed:[],busy:0};
   const clients=state.data.Clients.map(c=>c.Client).filter(Boolean).sort();
   const fieldHTML=([key,label,type,opts])=>{
     const id="fld-"+key.replace(/[^A-Za-z0-9]/g,"_");const raw=r[key]??"";
     if(type==="hidden")return "";
+    if(type==="photos")return `<div class="f full"><label>Photos <span class="hint">Optional · saved to Google Drive</span></label><div class="photos" id="photoGrid"></div><input type="file" id="photoInput" accept="image/*" multiple hidden></div>`;
     if(type==="textarea")return `<div class="f full"><label for="${id}">${label}</label><textarea id="${id}" data-k="${esc(key)}">${esc(raw)}</textarea></div>`;
     if(type==="select"){const list=raw&&!opts.includes(raw)?[...opts,raw]:opts;return `<div class="f"><label for="${id}">${label}</label><select id="${id}" data-k="${esc(key)}"><option value=""></option>${list.map(o=>`<option ${raw===o?"selected":""}>${esc(o)}</option>`).join("")}</select></div>`}
     if(type==="client")return `<div class="f"><label for="${id}">${label}</label><input id="${id}" data-k="${esc(key)}" list="clientList" value="${esc(raw)}" autocomplete="off"><datalist id="clientList">${clients.map(c=>`<option value="${esc(c)}"></option>`).join("")}</datalist></div>`;
@@ -328,19 +473,58 @@ function openForm(name,rec,prefill){
     <div class="actions"><div id="delWrap">${isNew?"":'<button class="btn danger" type="button" id="delBtn">Delete</button>'}</div>
     <div class="row"><button class="btn ghost" type="button" data-close>Cancel</button><button class="btn" type="button" id="saveBtn">${isNew?"Add":"Save"}</button></div></div>
   </div></div>`;
-  const close=()=>{$("#modalRoot").innerHTML=""};
-  $("#sheet").addEventListener("click",e=>{if(e.target.id==="sheet"||e.target.closest("[data-close]"))close()});
+
+  const label=()=>{const el=document.querySelector('#recForm [data-k="Client"]');return (el&&el.value)||[r.Brand,r["Specs / Description"]].filter(Boolean).join(" ").slice(0,50)||""};
+  const grid=$("#photoGrid"),input=$("#photoInput");
+  const renderPhotos=()=>{
+    if(!grid)return;
+    grid.innerHTML=ph.ids.map(id=>`<div class="ph"><button type="button" class="ph-img" data-view-photo="${esc(id)}" aria-label="View photo"><span class="ph-load"></span></button><button type="button" class="ph-x" data-rm="${esc(id)}" aria-label="Remove photo">×</button></div>`).join("")
+      +Array.from({length:ph.busy},()=>`<div class="ph busy"><span class="spin" aria-label="Uploading"></span></div>`).join("")
+      +`<button type="button" class="ph add" id="photoAdd">${CAM}<span>Add photos</span></button>`;
+    grid.querySelectorAll("[data-view-photo]").forEach(b=>{const id=b.dataset.viewPhoto;
+      photoURL(id).then(u=>{b.innerHTML=`<img src="${u}" alt="">`}).catch(()=>{b.innerHTML='<span class="ph-err">Can\'t load</span>'})});
+  };
+  renderPhotos();
+  if(grid){
+    grid.addEventListener("click",e=>{
+      if(e.target.closest("#photoAdd")){input.click();return}
+      const rm=e.target.closest("[data-rm]");
+      if(rm){const id=rm.dataset.rm;ph.ids=ph.ids.filter(x=>x!==id);
+        if(ph.added.includes(id)){ph.added=ph.added.filter(x=>x!==id);api({action:"trash",id}).catch(()=>{})}else ph.removed.push(id);
+        renderPhotos();return}
+      const vw=e.target.closest("[data-view-photo]");if(vw)openViewer(vw.dataset.viewPhoto);
+    });
+    input.addEventListener("change",async()=>{
+      const files=[...input.files];input.value="";
+      ph.busy+=files.length;renderPhotos();
+      for(const f of files){
+        try{const s=await shrinkPhoto(f);const j=await api({action:"upload",sheet:t.sheet,label:label(),...s});ph.ids.push(j.id);ph.added.push(j.id)}
+        catch(e){toast(e&&e.code==="bad_image"?e.message:"Photo upload failed: "+errMsg(e))}
+        finally{ph.busy--;renderPhotos()}
+      }
+    });
+  }
+
+  const close=(saved)=>{
+    if(!saved)ph.added.forEach(id=>api({action:"trash",id}).catch(()=>{}));
+    closeModal=null;$("#modalRoot").innerHTML="";
+  };
+  closeModal=()=>close(false);
+  $("#sheet").addEventListener("click",e=>{if(e.target.id==="sheet"||e.target.closest("[data-close]"))close(false)});
   $("#recForm").addEventListener("submit",e=>e.preventDefault());
   $("#saveBtn").onclick=async()=>{
+    if(ph.busy){toast("Wait for the photos to finish uploading");return}
     document.querySelectorAll("#recForm [data-k]").forEach(el=>{r[el.dataset.k]=el.value.trim()});
+    if(t.fields.some(f=>f[2]==="photos"))r.Photos=ph.ids.join(", ");
     const b=$("#saveBtn");b.disabled=true;b.textContent="Saving…";
-    if(await saveRecord(name,r,isNew,rec))close();else{b.disabled=false;b.textContent=isNew?"Add":"Save"}
+    if(await saveRecord(name,r,isNew,rec)){ph.removed.forEach(id=>api({action:"trash",id}).catch(()=>{}));close(true)}
+    else{b.disabled=false;b.textContent=isNew?"Add":"Save"}
   };
   const del=$("#delBtn");
   const askDelete=()=>{
     $("#delWrap").innerHTML=`<div class="confirm">Delete this row from the sheet? <button class="btn danger" type="button" id="delYes">Yes, delete</button><button class="btn ghost" type="button" id="delNo">Keep</button></div>`;
     $("#delNo").onclick=()=>{$("#delWrap").innerHTML='<button class="btn danger" type="button" id="delBtn">Delete</button>';$("#delBtn").onclick=askDelete};
-    $("#delYes").onclick=async()=>{$("#delYes").disabled=true;if(await deleteRecord(name,rec))close()};
+    $("#delYes").onclick=async()=>{$("#delYes").disabled=true;if(await deleteRecord(name,rec))close(true)};
   };
   if(del)del.onclick=askDelete;
 }
@@ -441,6 +625,7 @@ document.addEventListener("click",async e=>{
   const n=e.target.closest("[data-new]");if(n){openForm(n.dataset.new);return}
   const ed=e.target.closest("[data-edit]");if(ed){const rec=state.data[ed.dataset.edit].find(r=>r._row==ed.dataset.row);if(rec)openForm(ed.dataset.edit,rec);return}
   const f=e.target.closest("[data-filter]");if(f){state.filter[f.dataset.filter]=f.dataset.val;render();return}
+  const pr=e.target.closest("[data-period]");if(pr){state.period=pr.dataset.period;lsSet("solarays.period",state.period);render();return}
   const a=e.target.closest("[data-act]");
   if(a&&a.dataset.act==="refresh"){state.sheetIds={};loadAll();return}
 });
@@ -448,12 +633,14 @@ document.addEventListener("input",e=>{
   const s=e.target.closest("[data-search]");if(!s)return;
   const k=s.dataset.search;state.q[k]=s.value;const pos=s.selectionStart;render();const el=document.getElementById("q-"+k);if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(x){}}
 });
-document.addEventListener("keydown",e=>{if(e.key==="Escape")$("#modalRoot").innerHTML=""});
+document.addEventListener("keydown",e=>{if(e.key!=="Escape")return;const v=document.querySelector(".viewer");if(v){v.remove();return}if(closeModal)closeModal();else $("#modalRoot").innerHTML=""});
+let resizeT;window.addEventListener("resize",()=>{clearTimeout(resizeT);resizeT=setTimeout(()=>{if(state.view==="home")drawCharts()},120)});
 $("#refreshBtn").onclick=()=>{state.sheetIds={};loadAll()};
 $("#settingsBtn").onclick=()=>{state.view="settings";render()};
 
 /* ---------- boot ---------- */
 try{const s=JSON.parse(lsGet("solarays.calc")||"null");if(s)Object.assign(calcIn,s)}catch(e){}
+{const p=lsGet("solarays.period");if(["30","12","all"].includes(p))state.period=p}
 const sv=lsGet("solarays.view");if(sv&&VIEWS.some(x=>x[0]===sv))state.view=sv;
 if(location.hash&&VIEWS.some(x=>x[0]===location.hash.slice(1)))state.view=location.hash.slice(1);
 render();
