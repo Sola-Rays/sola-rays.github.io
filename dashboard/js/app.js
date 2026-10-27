@@ -1418,9 +1418,9 @@ function catalogue(){
   const priced=S.filter(s=>num(s.SRP)>0),skipped=[];
   const pv=[],inv=[],bat=[],acc=[];
   priced.forEach(s=>{const k=kindOfItem(s),b=brandOf(s);
-    if(k==="pv"){const w=wOf(s);if(w>=150)pv.push({id:supId(s),s,w,price:num(s.SRP),wy:warrantyOf(s),label:`${b?b+" ":""}${w}W`});else skipped.push([s,"panel watts (e.g. 580W)"])}
-    else if(k==="inv"){const kw=kwOf(s);if(kw>0)inv.push({id:supId(s),s,kw,price:num(s.SRP),wy:warrantyOf(s),label:`${b?b+" ":""}${kw}kW`});else skipped.push([s,"inverter size (e.g. 6kW)"])}
-    else if(k==="bat"){const kwh=kwhOf(s),v=batVolt(s);if(v&&v<40)skipped.push([s,"a 48V/51.2V battery (this one is "+v+"V)"]);else if(kwh>=1)bat.push({id:supId(s),s,kwh,price:num(s.SRP),wy:warrantyOf(s),label:`${b?b+" ":""}${kwh} kWh`});else skipped.push([s,"battery size (e.g. 5.12kWh or 51.2V 100Ah)"])}
+    if(k==="pv"){const w=wOf(s);if(w>=150)pv.push({id:supId(s),s,w,price:num(s.SRP),wy:warrantyOf(s),label:`${b||s.Supplier||""} ${w}W`.trim()});else skipped.push([s,"panel watts (e.g. 580W)"])}
+    else if(k==="inv"){const kw=kwOf(s);if(kw>0)inv.push({id:supId(s),s,kw,price:num(s.SRP),wy:warrantyOf(s),label:`${b||s.Supplier||""} ${kw}kW`.trim()});else skipped.push([s,"inverter size (e.g. 6kW)"])}
+    else if(k==="bat"){const kwh=kwhOf(s),v=batVolt(s);if(v&&v<40)skipped.push([s,"a 48V/51.2V battery (this one is "+v+"V)"]);else if(kwh>=1)bat.push({id:supId(s),s,kwh,price:num(s.SRP),wy:warrantyOf(s),label:`${b||s.Supplier||""} ${kwh} kWh`.trim()});else skipped.push([s,"battery size (e.g. 5.12kWh or 51.2V 100Ah)"])}
     else acc.push(s)});
   CAT_KEY=key;CAT_CACHE={pv,inv,bat,acc,skipped};return CAT_CACHE;
 }
@@ -1672,13 +1672,14 @@ function c2right(r){
 const TIER_COLORS=["#B9A6FF","#FFB612","#6CB4FF","#4FD18B","#FF7A59","#3DD6C6"];
 function pkgRun(p){return calcRun({...C,...p.cfg})}
 function c2packages(){
+  sortPkgs();
   const runs=PKGS.map(p=>({p,r:pkgRun(p)}));const cat=catalogue();
   const opt=(list,cur,auto)=>auto.map(([v,l])=>`<option value="${v}" ${String(cur)===v?"selected":""}>${esc(l)}</option>`).join("")+list.map(x=>`<option value="${esc(x.id)}" ${String(cur)===x.id?"selected":""}>${esc(optLabel(x))}</option>`).join("");
   const many=PKGS.length>3;
   const card=({p,r},i)=>{const col=TIER_COLORS[i%6],c=p.cfg||{};
     const bq=c.batQty!==""&&c.batQty!=null?c.batQty:"";
     return `<section class="pkcard ${p.sel===false?"off":""}" style="--c:${col}">
-      <div class="pkh"><span class="pkdot"></span><input class="pkname" data-pkname="${i}" value="${esc(p.label)}" aria-label="Package ${i+1} name"><button type="button" class="pksel" data-pksel="${i}" aria-pressed="${p.sel!==false}" aria-label="Include in quotation"></button></div>
+      <div class="pkh"><span class="pkno">${i+1}</span><input class="pkname" data-pkname="${i}" value="${esc(p.label)}" aria-label="Package ${i+1} name"><button type="button" class="pksel" data-pksel="${i}" aria-pressed="${p.sel!==false}" aria-label="Include in quotation"></button></div>
       <div class="pkbody">
         <label class="pkf"><span>Panels <em>${r.qty} pcs · ${r.kwp.toFixed(2)} kWp</em></span><select class="form-select" data-pkf="${i}:panel">${opt(cat.pv,c.panel||"auto",[["auto","Auto · lowest ₱ per watt"],["auto-premium","Auto · longest warranty"]])}</select></label>
         <label class="pkf"><span>Inverter <em>${r.inv?r.inv.kw+" kW · "+Math.round(r.kwp/r.inv.kw*100)+"% load":"none fits"}</em></span><select class="form-select" data-pkf="${i}:inverter">${opt(cat.inv,c.inverter||"auto",[["auto","Auto · lowest price that fits"],["auto-premium","Auto · longest warranty that fits"]])}</select></label>
@@ -1691,9 +1692,9 @@ function c2packages(){
     </section>`};
   const dupes=new Set();const keys=runs.map(x=>pkgKey(x.r));keys.forEach((k,i)=>{if(keys.indexOf(k)!==i)dupes.add(i)});
   const cards=runs.map(card).join("")+(PKGS.length<6?`<button type="button" class="pkadd" data-c2act="pkadd"><b>+</b><span>Add current setup</span><em>${PKGS.length} of 6</em></button>`:"");
-  const empty=!PKGS.length?`<div class="pkempty"><b>No packages yet</b><span>Let the calculator suggest packages from everything in your Suppliers tab, or set up a system in Sizing and tap Add current setup.</span><div class="hrow"><label class="sugn"><select class="form-select" data-sugn aria-label="How many packages">${[3,4,5,6].map(n=>`<option ${n===3?"selected":""}>${n}</option>`).join("")}</select></label><button type="button" class="btn btn-sol" data-c2act="suggest">Suggest packages</button></div></div>`:"";
+  const empty=!PKGS.length?`<div class="pkempty"><b>No packages yet</b><span>Let the calculator suggest packages from everything in your Suppliers tab, or set up a system in Sizing and tap Add current setup.</span><div class="hrow"><label class="sugn"><select class="form-select" data-sugn aria-label="How many packages">${[3,4,5,6].map(n=>`<option ${n===6?"selected":""}>${n}</option>`).join("")}</select></label><button type="button" class="btn btn-sol" data-c2act="suggest">Suggest packages</button></div></div>`:"";
   const sel=runs.filter(x=>x.p.sel!==false);
-  const cnt=Math.max(3,PKGS.length);
+  const cnt=6;
   return `<div class="c2pk ${many?"many":""}">${empty||`<div class="pkgrid" style="--n:${Math.min(PKGS.length+(PKGS.length<6?1:0),4)}">${cards}</div>`}
     <section class="card pkbar"><div class="pkinfo"><b>${sel.length} of ${PKGS.length} package${PKGS.length===1?"":"s"} in the quotation</b><span>${dupes.size?`<em class="warnc">Some packages have the same components. Change their panels, inverter or battery.</em>`:"Tap the circle on a package to include or leave it out."}</span></div>
       <div class="pkgo"><div class="hrow"><label class="sugn"><span>Suggest</span><select class="form-select" data-sugn aria-label="How many packages to suggest">${[3,4,5,6].map(n=>`<option ${n===cnt?"selected":""}>${n}</option>`).join("")}</select></label><button type="button" class="btn btn-line btn-sm" data-c2act="suggest" title="Make different packages from your supplier list">Suggest</button><button type="button" class="btn btn-sol" data-c2act="quote">Send ${sel.length>1?sel.length+" packages":"to quotation"}${sel.length>1?" to quotation":""}</button></div></div></section></div>`;
@@ -1727,56 +1728,74 @@ function applyClient(no){
   if(c){if(num(c.kWh)){C.kwh=num(c.kWh);C.mode="kwh"}if(num(c.Amount))C.bill=Math.round(num(c.Amount)*100)/100;if(num(c["Rate per kWh"]))C.rate=num(c["Rate per kWh"]);if(c.DU)C.utility=c.DU}
   saveCalc();
 }
-/* Suggest 3 to 6 packages that really differ: panels, inverter brand or warranty, and battery size are mixed
-   from everything in your Suppliers tab, then spread from the most complete (Premium) to the lowest price (Value). */
-const TIER_NAMES={3:["Premium","Standard","Value"],4:["Premium","Plus","Standard","Value"],5:["Premium","Plus","Standard","Basic","Value"],6:["Premium","Plus","Standard","Smart","Basic","Value"]};
+/* Packages: up to 6, each built from different brands of panels, inverter and battery where your supplier list has them.
+   They are always listed from the highest selling price (Package 1) to the lowest. */
+const TIER_NAMES={1:["Standard"],2:["Premium","Value"],3:["Premium","Standard","Value"],4:["Premium","Plus","Standard","Value"],5:["Premium","Plus","Standard","Basic","Value"],6:["Premium","Plus","Standard","Smart","Basic","Value"]};
+const ALL_TIER=new Set(["Premium","Plus","Standard","Smart","Basic","Value","Starter","Option 6","Solar Package"]);
 function pkgKey(r){return [r.pv&&r.pv.id,r.qty,r.inv&&r.inv.id,r.bat&&r.bat.id,r.batN].join("|")}
-function suggestPackages(n){
-  n=Math.max(3,Math.min(6,n||3));
-  const cat=catalogue();
-  const base={goal:C.goal,backupHrs:C.backupHrs,priceBy:C.priceBy,mult:C.mult,margin:C.margin,profit:C.profit,manual:"",panelQty:""};
+const bName=x=>x?(brandOf(x.s)||String(x.s.Supplier||"")).toLowerCase():"";
+function pkgBase(){return {goal:C.goal,backupHrs:C.backupHrs,priceBy:C.priceBy,mult:C.mult,margin:C.margin,profit:C.profit,manual:"",panelQty:""}}
+/* every sensible combination from the Suppliers tab, with the inverter sized to the panels (80–130% load) */
+function packageCandidates(){
+  const cat=catalogue(),base=pkgBase();
   const ref=calcRun({...C,...base,panel:"auto",inverter:"auto",battery:"auto",batQty:""});
-  if(!ref.pv||!ref.inv){PKGS=[{label:"Standard",cfg:{...base,panel:"auto",inverter:"auto",battery:"auto",batQty:""},sel:true}];saveCalc();return}
-  const byBrand=(list,score)=>{const m=new Map();[...list].sort(score).forEach(x=>{const k=(brandOf(x.s)||x.s.Supplier||"")+"|"+(x.w||x.kw||x.kwh);if(!m.has(k))m.set(k,x)});return [...m.values()]};
-  const pvs=byBrand(cat.pv,(a,b)=>a.price/a.w-b.price/b.w).slice(0,4);
-  const kwp=ref.kwp;
-  let invs=cat.inv.filter(x=>x.kw>=kwp*0.8&&x.kw<=Math.max(kwp*1.5,kwp+2));if(!invs.length)invs=[ref.inv];
-  invs=byBrand(invs,(a,b)=>a.kw-b.kw||a.price-b.price).slice(0,6);
-  const need=ref.need||0;
-  const batOpts=[];
-  cat.bat.forEach(b=>{const full=Math.max(1,Math.ceil(need/b.kwh-0.02));if(full<=6)batOpts.push({id:b.id,n:full,b});const half=Math.max(1,Math.round(full/2));if(half!==full)batOpts.push({id:b.id,n:half,b})});
-  const cands=[],seen=new Set();
-  pvs.forEach(pv=>invs.forEach(inv=>(batOpts.length?batOpts:[{id:"none",n:""}]).forEach(bo=>{
+  if(!ref.pv||!cat.inv.length)return [];
+  const pvs=[...cat.pv].sort((a,b)=>a.price/a.w-b.price/b.w).slice(0,8);
+  const kwp=ref.kwp,invs=cat.inv.filter(x=>x.kw>=kwp*0.7&&x.kw<=kwp*1.35);
+  const need=ref.need||0,bats=[];
+  cat.bat.forEach(b=>{const full=Math.max(1,Math.ceil(need/b.kwh-0.02));if(full<=6)bats.push({id:b.id,n:full});if(full>1&&b.kwh*(full-1)>=need*0.6)bats.push({id:b.id,n:full-1})});
+  const out=[],seen=new Set();
+  pvs.forEach(pv=>(invs.length?invs:[ref.inv]).forEach(inv=>(bats.length?bats:[{id:"none",n:""}]).forEach(bo=>{
     const cfg={...base,panel:pv.id,inverter:inv.id,battery:bo.id,batQty:bo.n};let r=calcRun({...C,...cfg});
     if(!r.inv||!r.pv)return;
-    /* inverter sized to the panels, no oversizing: add up to 3 panels to reach at least 80% inverter load */
     if(r.kwp/r.inv.kw<0.8){const q=Math.ceil(0.8*r.inv.kw*1000/r.W);if(q-r.qty>3)return;cfg.panelQty=q;r=calcRun({...C,...cfg})}
     const ratio=r.kwp/r.inv.kw;if(ratio<0.8||ratio>1.3)return;
-    const k=pkgKey(r);if(seen.has(k))return;seen.add(k);
+    const key=pkgKey(r);if(seen.has(key))return;seen.add(key);
     const cover=r.need?Math.min(1,r.batKWh/r.need):0;
-    const quality=(r.pv.wy||0)*0.6+(r.inv.wy||0)*1+(r.bat?r.bat.wy||0:0)*1+cover*8+r.batKWh*0.3;
-    cands.push({cfg,r,price:r.contract,quality});
+    out.push({cfg,r,key,price:r.contract,pb:bName(r.pv),ib:bName(r.inv),bb:bName(r.bat),inv:r.inv.id,bat:r.bat?r.bat.id:"",
+      quality:(r.pv.wy||0)*0.6+(r.inv.wy||0)+(r.bat?r.bat.wy||0:0)+cover*8});
   })));
-  if(!cands.length){suggestPackagesSimple();return}
-  cands.sort((a,b)=>a.price-b.price);
-  const picks=[];const add=c=>{if(c&&!picks.includes(c))picks.push(c)};
-  add([...cands].sort((a,b)=>b.quality-a.quality||b.price-a.price)[0]);           /* Premium: longest warranties, full backup */
-  add(cands[0]);                                                                   /* Value: lowest price */
-  const lo=cands[0].price,hi=picks[0].price;
-  for(let k=1;picks.length<n&&k<n;k++){                                            /* the rest: spread between Value and Premium, best quality near each price */
-    const target=lo+(hi-lo)*k/(n-1);
-    const near=cands.filter(c=>!picks.includes(c)).sort((a,b)=>Math.abs(a.price-target)-Math.abs(b.price-target)).slice(0,4).sort((a,b)=>b.quality-a.quality)[0];add(near);
+  return out;
+}
+/* choose n packages spread from high to low price, avoiding brands already used */
+function pickDiverse(cands,n,existing){
+  const chosen=(existing||[]).slice(),out=[];if(!cands.length)return out;
+  const sorted=[...cands].sort((a,b)=>b.price-a.price),hi=sorted[0].price,lo=sorted[sorted.length-1].price,span=Math.max(1,hi-lo);
+  const todo=n;
+  for(let k=0;k<todo;k++){
+    const target=todo===1?(lo+hi)/2:hi-span*k/(todo-1);
+    let best=null,bs=Infinity;
+    for(const c of sorted){
+      if(chosen.some(x=>x.key===c.key))continue;
+      let ov=0;chosen.forEach(x=>{if(x.ib&&x.ib===c.ib)ov+=3;if(x.bb&&x.bb===c.bb)ov+=3;if(x.pb&&x.pb===c.pb)ov+=1;if(x.inv===c.inv)ov+=2;if(x.bat===c.bat)ov+=2;if(Math.abs(x.price-c.price)<1000)ov+=4});
+      const score=ov+Math.abs(c.price-target)/span*5-c.quality*0.03;
+      if(score<bs){bs=score;best=c}
+    }
+    if(!best)break;chosen.push(best);out.push(best);
   }
-  while(picks.length<n){const c=cands.find(x=>!picks.includes(x));if(!c)break;add(c)}
-  picks.sort((a,b)=>b.price-a.price);
-  const names=TIER_NAMES[picks.length]||TIER_NAMES[3].concat(["Option 4","Option 5","Option 6"]).slice(0,picks.length);
-  PKGS=picks.map((c,i)=>({label:names[i]||"Package "+(i+1),cfg:c.cfg,sel:true}));
-  saveCalc();
+  return out;
+}
+function runInfo(p){const r=pkgRun(p);return {key:pkgKey(r),price:r.contract,pb:bName(r.pv),ib:bName(r.inv),bb:bName(r.bat),inv:r.inv?r.inv.id:"",bat:r.bat?r.bat.id:""}}
+/* keep packages ordered by selling price, highest first, and name them by rank unless you renamed them */
+function sortPkgs(){
+  const withPrice=PKGS.map(p=>[p,pkgRun(p).contract]);withPrice.sort((a,b)=>b[1]-a[1]);PKGS=withPrice.map(x=>x[0]);
+  const names=TIER_NAMES[PKGS.length]||[];PKGS.forEach((p,i)=>{if(!p.custom&&(ALL_TIER.has(p.label)||!p.label))p.label=names[i]||"Package "+(i+1)});
+}
+function suggestPackages(n){
+  n=Math.max(1,Math.min(6,n||6));
+  const cands=packageCandidates();
+  if(!cands.length){PKGS=[{label:"Standard",cfg:{...pkgBase(),panel:"auto",inverter:"auto",battery:"auto",batQty:""},sel:true}];saveCalc();toast("Add panels, inverters and batteries with prices in Suppliers to get package suggestions");return}
+  const picks=pickDiverse(cands,n);
+  PKGS=picks.map(c=>({label:"",cfg:c.cfg,sel:true}));sortPkgs();saveCalc();
   if(picks.length<n)toast(`${picks.length} different packages fit this client with your current supplier items`);
 }
-function suggestPackagesSimple(){
-  const base={goal:C.goal,backupHrs:C.backupHrs,priceBy:C.priceBy,mult:C.mult,margin:C.margin,profit:C.profit,manual:"",panelQty:""};
-  PKGS=[{label:"Premium",cfg:{...base,panel:"auto-premium",inverter:"auto-premium",battery:"auto-premium",batQty:""},sel:true},{label:"Value",cfg:{...base,panel:"auto",inverter:"auto",battery:"auto",batQty:""},sel:true}];saveCalc();
+/* + Add package: your current setup, or the next best different package if that one is already there */
+function addPackage(){
+  if(PKGS.length>=6){toast("Up to 6 packages");return}
+  const cur=calcRun({...C,...pkCfg()}),ck=pkgKey(cur),have=PKGS.map(runInfo);
+  if(!have.some(h=>h.key===ck)&&cur.inv&&cur.pv){PKGS.push({label:"",cfg:pkCfg(),sel:true})}
+  else{const next=pickDiverse(packageCandidates(),1,have)[0];if(!next){toast("No other combination left in your supplier list. Add more items in Suppliers.");return}PKGS.push({label:"",cfg:next.cfg,sel:true})}
+  sortPkgs();saveCalc();
 }
 function showItems(){
   const r=calcRun();
@@ -2161,7 +2180,7 @@ const pkCfg=()=>{const o={};CALC_KEYS_EQUIP.forEach(k=>o[k]=C[k]);return o};
 document.addEventListener("input",e=>{
   const el=e.target;if(!el.closest||!el.closest("#main"))return;
   if(el.dataset.c2h!==undefined){C.hist[+el.dataset.c2h]=el.value;calcRefresh();return}
-  if(el.dataset.pkname!==undefined){const p=PKGS[+el.dataset.pkname];if(p){p.label=el.value;saveCalc()}return}
+  if(el.dataset.pkname!==undefined){const p=PKGS[+el.dataset.pkname];if(p){p.label=el.value;p.custom=true;saveCalc()}return}
   const k=el.dataset.c2;if(!k||el.tagName==="SELECT")return;
   C[k]=el.value;
   if(k==="dayShare"){const w=el.closest(".c2day");w.style.setProperty("--d",el.value+"%");w.querySelector(".dl").textContent=`Day ${el.value}%`;w.querySelector(".nl").textContent=`Night ${100-el.value}%`;const h=w.parentElement.querySelector(".c2h");if(h)h.textContent=`day ${el.value}% · night ${100-el.value}%`}
@@ -2190,10 +2209,10 @@ document.addEventListener("click",e=>{
   if(d.pkup){const i=+d.pkup;if(i>0){[PKGS[i-1],PKGS[i]]=[PKGS[i],PKGS[i-1]];saveCalc();render()}return}
   if(d.pkrm){const i=+d.pkrm;PKGS.splice(i,1);if(C.editing===i)C.editing=null;saveCalc();render();return}
   const a=d.c2act;
-  if(a==="pkadd"){if(PKGS.length>=6){toast("Up to 6 packages");return}{const nk=pkgKey(calcRun({...C,...pkCfg()}));const same=PKGS.find(p=>pkgKey(pkgRun(p))===nk);if(same){toast(`Same panels, inverter and battery as ${same.label}. Change a component first.`);return}}const used=new Set(PKGS.map(p=>p.label));PKGS.push({label:PK_NAMES.find(x=>!used.has(x))||"Package "+(PKGS.length+1),cfg:pkCfg(),sel:true});saveCalc();if(C.view!=="pkg")toast(`Added as package ${PKGS.length}`);render();return}
-  if(a==="pkupdate"){const p=PKGS[C.editing];if(p){p.cfg=pkCfg();toast(p.label+" updated")}C.editing=null;C.view="pkg";saveCalc();render();return}
+  if(a==="pkadd"){addPackage();if(C.view!=="pkg")toast(`Added. You now have ${PKGS.length} package${PKGS.length>1?"s":""}`);render();return;if(PKGS.length>=6){toast("Up to 6 packages");return}const used=new Set(PKGS.map(p=>p.label));PKGS.push({label:PK_NAMES.find(x=>!used.has(x))||"Package "+(PKGS.length+1),cfg:pkCfg(),sel:true});saveCalc();if(C.view!=="pkg")toast(`Added as package ${PKGS.length}`);render();return}
+  if(a==="pkupdate"){const p=PKGS[C.editing];if(p){p.cfg=pkCfg();sortPkgs();toast(p.label+" updated")}C.editing=null;C.view="pkg";saveCalc();render();return}
   if(a==="pkcancel"){C.editing=null;saveCalc();render();return}
-  if(a==="suggest"){if(PKGS.length&&!confirmReplace())return;suggestPackages(+((document.querySelector("[data-sugn]")||{}).value)||Math.max(3,PKGS.length));C.view="pkg";render();return}
+  if(a==="suggest"){if(PKGS.length&&!confirmReplace())return;suggestPackages(+((document.querySelector("[data-sugn]")||{}).value)||6);C.view="pkg";render();return}
   if(a==="items"){showItems();return}
   if(a==="saveclient"){saveCalcToClient();return}
   if(a==="quote"){openQuote();return}

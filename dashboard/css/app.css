@@ -930,3 +930,14 @@ html.modal-open .app{pointer-events:none}
 .pkinfo b{font-size:14px}
 .sugn{display:flex;align-items:center;gap:4px;margin:0}.sugn>span{font-size:12px;color:var(--faint);font-weight:600}
 .sugn .form-select{min-height:34px;width:64px;padding:4px 26px 4px 10px;font-size:13px;border-radius:10px;background-position:right 8px center}
+
+/* package cards: compact rows so panels, inverter and battery always show */
+.pkno{width:24px;height:24px;border-radius:50%;background:var(--c);color:var(--deep);font-weight:900;font-size:12.5px;display:flex;align-items:center;justify-content:center;flex:none}
+.pkbody{overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;gap:5px}
+.pkf{display:grid;grid-template-columns:minmax(0,1fr);gap:1px}
+.c2pk.many .pkf>span{font-size:10.5px}
+.c2pk.many .pkf .form-select{min-height:31px;padding-top:3px;padding-bottom:3px;font-size:12.5px}
+.c2pk.many .pkh .pkname{font-size:15px}
+.c2pk.many .pkcard::before{height:3px}
+.pkbar{gap:12px}
+@media (min-width:700px){.c2pk.many .pkf>span em{display:inline}}
