@@ -1,0 +1,16 @@
+{
+  "name": "SolaRays Dashboard",
+  "short_name": "SolaRays",
+  "description": "SolaRays business dashboard: clients, projects, calendar, suppliers and solar calculator.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#16212E",
+  "theme_color": "#1D2A3A",
+  "icons": [
+    {"src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
