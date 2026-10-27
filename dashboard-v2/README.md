@@ -1,0 +1,1 @@
+SolaRays dashboard v2
