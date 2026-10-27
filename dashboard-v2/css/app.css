@@ -140,7 +140,9 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .tight .mtabs button{min-height:30px;font-size:11.5px;padding:4px 2px}
 .gs{display:none}
 .cdh .lbl{display:inline!important}
-.kgrid{display:grid;grid-template-columns:repeat(var(--kc),minmax(0,1fr));gap:10px 10px;flex:none}
+.kgrid{display:flex;flex-direction:column;gap:10px;flex:none;min-width:0}
+.krow{display:flex;gap:10px;min-width:0}
+.krow .kpi{flex:1 1 0}
 .kgrid.multi{gap:8px}
 .kgrid.multi .kpi{padding:8px 12px 7px}
 .kgrid.multi .kpi .v{font-size:20px}
@@ -152,7 +154,9 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .kpi .v.y{color:var(--sol)}.kpi .v.g{color:var(--good)}
 .kpi .h{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .spark{display:block;width:100%;height:26px;margin-top:5px}
-.pgrid{flex:1;min-height:0;display:grid;grid-template-columns:repeat(var(--pc),minmax(0,1fr));grid-auto-rows:minmax(0,1fr);grid-auto-flow:row dense;gap:12px}
+.pgrid{flex:1;min-height:0;min-width:0;display:flex;flex-direction:column;gap:12px}
+.drow{flex:1 1 0;min-height:0;min-width:0;display:flex;gap:12px}
+.drow>.pnl{flex:var(--w,1) 1 0;min-width:0}
 .pgrid.none{display:block}
 .pnl{position:relative}
 .tap{cursor:pointer;transition:border-color .2s,box-shadow .2s}
@@ -221,7 +225,7 @@ input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and
 .pdot.on::before{width:20px;background:var(--sol)}
 /* editing */
 .editing .kpi,.editing .pnl{outline:2px dashed rgba(255,182,18,.5);outline-offset:-3px}
-.ectl{position:absolute;top:6px;right:6px;display:flex;gap:4px;z-index:3}
+.ectl{position:absolute;top:6px;right:6px;display:flex;align-items:center;gap:4px;z-index:3;background:rgba(10,16,24,.6);padding:3px;border-radius:11px}
 .ectl>*{width:32px;height:32px;border-radius:9px;border:0;background:rgba(10,16,24,.88);color:#fff;display:flex;align-items:center;justify-content:center;padding:0}
 .ectl svg{width:16px;height:16px}
 .ectl .rm{background:var(--bad);color:var(--deep)}
@@ -864,7 +868,8 @@ html.modal-open .app{pointer-events:none}
 .supsel .form-select{background-color:transparent;border:0;font-weight:700;min-height:40px;padding-left:6px;box-shadow:none;min-width:0}
 /* phone dashboard: every widget stacked on one page that scrolls */
 .v-home.phone{overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;margin:0 -12px;padding:0 12px 12px}
-.v-home.phone .pgrid{flex:none;grid-auto-rows:250px}
+.v-home.phone .pgrid{flex:none}
+.v-home.phone .drow{flex:none;height:250px}
 .v-home.phone .kpi .spark{display:none}
 @media (max-width:699px){
   .supsel{max-width:150px;padding-left:8px}.supsel>span{display:none}
@@ -883,3 +888,23 @@ html.modal-open .app{pointer-events:none}
   .donut{gap:10px}.lg em{display:none}
   .prow .r .pill{display:none}
 }
+
+/* editing: drag a widget to move it, drag the right edge to resize */
+.editing .kpi,.editing .pnl{user-select:none;-webkit-user-select:none;touch-action:none;cursor:grab}
+.editing .pnl .cbody,.editing .kpi>*:not(.ectl){pointer-events:none}
+.ectl button:disabled{opacity:.35}
+.ectl button{font-size:18px;font-weight:800;line-height:1}
+.wtag{font-size:11px;font-weight:800;color:var(--sol);min-width:26px;text-align:center;background:none!important;width:auto!important}
+.rsz{position:absolute;top:10px;bottom:10px;right:0;width:16px;cursor:ew-resize;z-index:4;touch-action:none;display:flex;align-items:center;justify-content:center}
+.rsz::before{content:"";width:5px;height:44px;max-height:60%;border-radius:3px;background:var(--sol);box-shadow:0 0 0 3px rgba(22,33,46,.7)}
+.resizing{outline:2px solid var(--sol)!important}
+.droptarget{box-shadow:inset 4px 0 0 var(--sol)}
+.droptarget.after{box-shadow:inset -4px 0 0 var(--sol)}
+.v-home.phone .rsz,.v-home.phone .wtag,.v-home.phone [data-size]{display:none}
+
+.ectl{top:auto;bottom:6px;right:6px;gap:3px;padding:2px}
+.ectl>*{width:28px;height:28px;border-radius:8px}
+.ectl svg{width:14px;height:14px}
+.kpi .ectl>*{width:26px;height:26px}
+.editing .kpi .spark{visibility:hidden}
+.editing .kpi{min-height:84px}

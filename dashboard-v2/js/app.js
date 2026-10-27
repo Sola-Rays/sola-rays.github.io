@@ -635,7 +635,8 @@ const LKEY="srv2.layout.one";const SKEY="dashboard.layout.one";
 function cleanLayout(L){
   const k=Array.isArray(L&&L.kpis)?L.kpis.filter((id,i,a)=>KPI_META[id]&&a.indexOf(id)===i):KPI_DEFAULT.slice();
   const p=Array.isArray(L&&L.panels)?L.panels.filter((id,i,a)=>PANEL_META[id]&&a.indexOf(id)===i):PANEL_DEFAULT.slice();
-  return {kpis:k,panels:p,at:(L&&L.at)||0};
+  const sz={};Object.keys(PANEL_META).forEach(id=>{const w=L&&L.sizes&&+L.sizes[id];sz[id]=w>=1&&w<=4?Math.round(w):(PANEL_META[id][2]?2:1)});
+  return {kpis:k,panels:p,sizes:sz,at:(L&&L.at)||0};
 }
 state.layout=(()=>{try{return cleanLayout(JSON.parse(lsGet(LKEY)||"null"))}catch(e){return cleanLayout(null)}})();
 function applyLayoutFromSheet(){
@@ -648,37 +649,40 @@ function storeLayout(sync){
   if(sync&&cfg.api)saveSetting(SKEY,JSON.stringify(state.layout));
 }
 
-/* Everything on one screen: the more widgets you show, the smaller each one gets */
-function dashFit(nK,panels){
+/* Everything on one screen, packed in rows that always fill the full width.
+   Each panel has a width of 1 to 4 parts; a row holds up to "cols" parts and its panels stretch to fill it. */
+const panelW=id=>(state.layout.sizes&&state.layout.sizes[id])||(PANEL_META[id][2]?2:1);
+function packRows(ids,cols){
+  const rows=[];let cur=[],used=0;
+  ids.forEach(id=>{const w=Math.min(cols,panelW(id));if(cur.length&&used+w>cols){rows.push(cur);cur=[];used=0}cur.push({id,w});used+=w});
+  if(cur.length)rows.push(cur);return rows;
+}
+function splitEven(list,rows){const out=[];let i=0;for(let r=0;r<rows;r++){const n=Math.ceil((list.length-i)/(rows-r));out.push(list.slice(i,i+n));i+=n}return out}
+function dashFit(kpis,panels){
   const m=$("#main"),phone=innerWidth<700;
   const W=(m&&m.clientWidth?m.clientWidth:innerWidth)-(phone?24:36);
   const H=(m&&m.clientHeight?m.clientHeight:innerHeight)-(phone?20:30);
-  if(phone||H<430)return {phone:true,kcols:phone?2:4,pcols:phone?1:2,prows:panels.length,tight:false};
-  const kmax=Math.max(2,Math.min(9,Math.floor((W+10)/150)));
-  const krows=nK?Math.ceil(nK/kmax):0,kcols=krows?Math.ceil(nK/krows):1;
-  const kh=krows>1?(H<760?66:74):(H<760?80:92);
-  const head=50,gap=12;
-  const ph=H-head-gap-(krows?krows*kh+(krows-1)*8+gap:0);
-  let best=null;
-  for(let c=1;c<=5;c++){
-    const cells=panels.reduce((a,id)=>a+(PANEL_META[id][2]&&c>=3?2:1),0);
-    const rows=Math.max(1,Math.ceil(cells/c));
-    const cw=(W-(c-1)*gap)/c,chh=(ph-(rows-1)*gap)/rows;
-    const score=Math.min(cw/290,chh/215)-(rows*c-cells)*0.09;
-    if(!best||score>best.score)best={c,rows,score,cw,chh};
-  }
-  return {phone:false,kcols,krows,pcols:best.c,prows:best.rows,tight:best.chh<165||best.cw<215};
+  if(phone||H<430){const cols=phone?1:2;return {phone:true,cols,krows:splitEven(kpis,Math.ceil(kpis.length/(phone?2:4))),rows:packRows(panels,cols),tight:false}}
+  const cols=W>=1150?4:W>=640?3:2;
+  const kmax=Math.max(2,Math.min(8,Math.floor((W+10)/150)));
+  const kr=kpis.length?Math.ceil(kpis.length/kmax):0;
+  const rows=packRows(panels,cols);
+  const kh=kr>1?(H<760?66:74):(H<760?80:92);
+  const ph=H-50-12-(kr?kr*kh+(kr-1)*8+12:0);
+  const rowH=rows.length?(ph-(rows.length-1)*12)/rows.length:ph;
+  return {phone:false,cols,krows:splitEven(kpis,kr),rows,tight:rowH<165,rowH};
 }
 
-function ectl(kind,id){
+function ectl(kind,id,w,cols){
   if(!state.edit)return "";
-  return `<div class="ectl"><span class="grip" data-drag="${kind}:${id}" title="Drag to move" aria-hidden="true">${UI.grip}</span><button type="button" data-move="${kind}:${id}:-1" aria-label="Move earlier">${UI.left}</button><button type="button" data-move="${kind}:${id}:1" aria-label="Move later">${UI.right}</button><button type="button" class="rm" data-remove="${kind}:${id}" aria-label="Remove">${UI.x}</button></div>`;
+  const size=kind==="panel"?`<button type="button" data-size="${id}:-1" ${w<=1?"disabled":""} aria-label="Make narrower" title="Narrower">−</button><span class="wtag" aria-hidden="true">${w}/${cols}</span><button type="button" data-size="${id}:1" ${w>=cols?"disabled":""} aria-label="Make wider" title="Wider">+</button>`:"";
+  return `<div class="ectl"><span class="grip" title="Drag to move" aria-hidden="true">${UI.grip}</span><button type="button" data-move="${kind}:${id}:-1" aria-label="Move earlier">${UI.left}</button><button type="button" data-move="${kind}:${id}:1" aria-label="Move later">${UI.right}</button>${size}<button type="button" class="rm" data-remove="${kind}:${id}" aria-label="Remove">${UI.x}</button></div>${kind==="panel"?`<span class="rsz" data-rsz="${id}" title="Drag to resize" aria-hidden="true"></span>`:""}`;
 }
 function kpiHTML(id,k){
   const go=state.edit?"":k.go;
   const val=k.text!==undefined?(k.text==null?"–":esc(k.text)):(k.n==null?"–":COUNT_FMT[k.fmt](k.n));
   const cnt=k.text===undefined&&k.n!=null&&!state.edit?`data-count="${k.n}" data-fmt="${k.fmt}"`:"";
-  return `<div class="kpi${go?" tap":""}${k.text!==undefined?" txt":""}" data-lid="kpi:${id}" ${go?`data-goto="${go}" tabindex="0" role="button" aria-label="${esc(k.label)}: open details"`:""}>${ectl("kpi",id)}<div class="l">${esc(k.label)}</div><div class="v ${k.vcls||""}" ${cnt}>${val}</div><div class="h" ${k.hc?`style="color:${k.hc}"`:""}>${esc(k.hint)}</div>${spark(k.vals&&k.vals.length?k.vals:[0,0],k.color||COL.sol)}</div>`;
+  return `<div class="kpi${go?" tap":""}${k.text!==undefined?" txt":""}" data-lid="kpi:${id}" ${go?`data-goto="${go}" tabindex="0" role="button" aria-label="${esc(k.label)}: open details"`:""}>${ectl("kpi",id,1,1)}<div class="l">${esc(k.label)}</div><div class="v ${k.vcls||""}" ${cnt}>${val}</div><div class="h" ${k.hc?`style="color:${k.hc}"`:""}>${esc(k.hint)}</div>${spark(k.vals&&k.vals.length?k.vals:[0,0],k.color||COL.sol)}</div>`;
 }
 const relDays=iso=>{if(!iso)return "";const d=daysBetween(iso,today());return d<=0?"today":d===1?"1 day ago":d+" days ago"};
 function panelBody(id,D){
@@ -739,25 +743,25 @@ function panelBody(id,D){
   }
   return {sub:"",body:""};
 }
-function panelHTML(it,D){
+function panelHTML(it,D,cols){
   const P=panelBody(it.id,D);const title=P.title||PANEL_META[it.id][0];const go=state.edit?"":P.go;
-  return `<section class="card pnl p-${it.id}${go?" tap":""}" data-lid="panel:${it.id}" ${go?`data-goto="${go}" tabindex="0"`:""} style="grid-column:span ${it.span}">${ectl("panel",it.id)}<div class="ch"><h2>${esc(title)}</h2><span>${esc(P.sub||"")}</span></div>${P.body}</section>`;
+  return `<section class="card pnl p-${it.id}${go?" tap":""}" data-lid="panel:${it.id}" ${go?`data-goto="${go}" tabindex="0"`:""} style="--w:${it.w}">${ectl("panel",it.id,it.w,cols)}<div class="ch"><h2>${esc(title)}</h2><span>${esc(P.sub||"")}</span></div>${P.body}</section>`;
 }
 function homeView(){
-  const D=dashCalc(),K=kpiDefs(D),L=state.layout,F=dashFit(L.kpis.length,L.panels);
+  const D=dashCalc(),K=kpiDefs(D),L=state.layout,F=dashFit(L.kpis,L.panels);
   const hr=new Date().getHours();const greet=hr<12?"Good morning":hr<18?"Good afternoon":"Good evening";
   const date=new Date().toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"});
   const seg=[["30","30 days"],["12","12 mo"],["all","All"]].map(([k,l])=>`<button type="button" class="btn${state.period===k?" on":""}" data-period="${k}" aria-pressed="${state.period===k}">${l}</button>`).join("");
   const acts=state.edit
-    ?`<span class="edithint">Drag the handle or use the arrows to move · × to remove</span><button type="button" class="btn btn-line" data-dact="add">${UI.plus}<span class="lbl">Add widget</span></button><button type="button" class="btn btn-line" data-dact="reset">${UI.reset}<span class="lbl">Reset</span></button><button type="button" class="btn btn-sol" data-dact="done">Done</button>`
+    ?`<span class="edithint">Drag a widget to move it · drag its right edge or use − + to resize · × to remove</span><button type="button" class="btn btn-line" data-dact="add">${UI.plus}<span class="lbl">Add widget</span></button><button type="button" class="btn btn-line" data-dact="reset">${UI.reset}<span class="lbl">Reset</span></button><button type="button" class="btn btn-sol" data-dact="done">Done</button>`
     :`<div class="seg" role="group" aria-label="Period">${seg}</div><button type="button" class="iconbtn" data-dact="edit" aria-label="Edit dashboard widgets" title="Edit widgets">${UI.edit}</button><button class="btn btn-line hide-sm" type="button" data-new="Projects">+ Project</button><button class="btn btn-sol hide-sm" type="button" data-new="Clients">+ Client</button>`;
   const empty=!L.kpis.length&&!L.panels.length?`<div class="empty big">Your dashboard is empty. Tap the pencil, then Add widget.</div>`:"";
-  const panels=L.panels.map(id=>panelHTML({id,span:PANEL_META[id][2]&&F.pcols>=3?2:1},D)).join("");
+  const panels=F.rows.map(r=>`<div class="drow">${r.map(it=>panelHTML(it,D,F.cols)).join("")}</div>`).join("");
   return `<div class="vw v-home${state.edit?" editing":""}${F.phone?" phone":""}${F.tight?" tight":""}" id="dash">
     <div class="dhead"><div class="dh-l"><h1><span class="gl">${greet}</span><span class="gs">Hi</span>, Raymund</h1><span class="sub">${date}</span></div><div class="acts">${acts}</div></div>
     ${state.edit&&F.tight?`<div class="fitnote">Your screen is full, so the widgets are getting small. Remove one or two for more room.</div>`:""}
-    ${L.kpis.length?`<div class="kgrid${F.krows>1?" multi":""}" style="--kc:${F.kcols}">${L.kpis.map(id=>kpiHTML(id,K[id])).join("")}</div>`:""}
-    ${L.panels.length?`<div class="pgrid" style="--pc:${F.pcols}">${panels}</div>`:""}
+    ${L.kpis.length?`<div class="kgrid${F.krows.length>1?" multi":""}">${F.krows.map(r=>`<div class="krow">${r.map(id=>kpiHTML(id,K[id])).join("")}</div>`).join("")}</div>`:""}
+    ${L.panels.length?`<div class="pgrid">${panels}</div>`:""}
     ${empty}
   </div>`;
 }
@@ -787,24 +791,35 @@ function openAddPanel(){
   $("#sheet").addEventListener("change",e=>{const a=e.target.dataset.add;if(!a)return;const [kind,id]=a.split(":");const k=kind==="kpi"?"kpis":"panels";
     if(e.target.checked){if(!state.layout[k].includes(id))state.layout[k].push(id)}else state.layout[k]=state.layout[k].filter(x=>x!==id);storeLayout(false)});
 }
-/* drag to reorder: works with a finger on iPad and with a mouse */
-let drag=null;
+function setSize(id,d){const c=dashFit(state.layout.kpis,state.layout.panels).cols;const w=Math.max(1,Math.min(c,panelW(id)+d));state.layout.sizes[id]=w;storeLayout(false);render()}
+/* drag a widget to move it, or drag a panel's right edge to resize it: works with a finger on iPad and with a mouse */
+let drag=null,pend=null,rsz=null;
 document.addEventListener("pointerdown",e=>{
-  const g=e.target.closest&&e.target.closest("[data-drag]");if(!g||!state.edit)return;
-  e.preventDefault();const [kind,id]=g.dataset.drag.split(":");const el=g.closest("[data-lid]");
-  const r=el.getBoundingClientRect();const ghost=el.cloneNode(true);ghost.classList.add("ghost");
-  Object.assign(ghost.style,{position:"fixed",left:r.left+"px",top:r.top+"px",width:r.width+"px",height:r.height+"px",margin:0,zIndex:90,pointerEvents:"none",gridRow:"auto",gridColumn:"auto"});
-  document.body.appendChild(ghost);el.classList.add("dragging");
-  drag={kind,id,el,ghost,dx:e.clientX-r.left,dy:e.clientY-r.top,target:null,after:false};
+  if(!state.edit||e.button>0)return;
+  const r=e.target.closest&&e.target.closest("[data-rsz]");
+  if(r){e.preventDefault();const el=r.closest("[data-lid]"),row=el.parentElement;const cols=dashFit(state.layout.kpis,state.layout.panels).cols;
+    rsz={id:r.dataset.rsz,el,x:e.clientX,w:panelW(r.dataset.rsz),unit:(row.parentElement.getBoundingClientRect().width+12)/cols,cols,nw:panelW(r.dataset.rsz)};el.classList.add("resizing");return}
+  const el=e.target.closest&&e.target.closest(".editing [data-lid]");
+  if(!el||e.target.closest(".ectl button,input,select,[data-rsz]"))return;
+  pend={el,x:e.clientX,y:e.clientY};
 });
 document.addEventListener("pointermove",e=>{
+  if(rsz){e.preventDefault();const nw=Math.max(1,Math.min(rsz.cols,Math.round(rsz.w+(e.clientX-rsz.x)/rsz.unit)));if(nw!==rsz.nw){rsz.nw=nw;rsz.el.style.setProperty("--w",nw);const t=rsz.el.querySelector(".wtag");if(t)t.textContent=nw+"/"+rsz.cols}return}
+  if(pend&&!drag&&Math.hypot(e.clientX-pend.x,e.clientY-pend.y)>6){
+    const el=pend.el,[kind,id]=el.dataset.lid.split(":"),r=el.getBoundingClientRect(),ghost=el.cloneNode(true);ghost.classList.add("ghost");
+    Object.assign(ghost.style,{position:"fixed",left:r.left+"px",top:r.top+"px",width:r.width+"px",height:r.height+"px",margin:0,zIndex:90,pointerEvents:"none"});
+    document.body.appendChild(ghost);el.classList.add("dragging");drag={kind,id,el,ghost,dx:pend.x-r.left,dy:pend.y-r.top,target:null,after:false};pend=null;
+  }
   if(!drag)return;e.preventDefault();
   drag.ghost.style.left=(e.clientX-drag.dx)+"px";drag.ghost.style.top=(e.clientY-drag.dy)+"px";
   document.querySelectorAll(".droptarget").forEach(x=>x.classList.remove("droptarget","after"));
   const under=document.elementsFromPoint(e.clientX,e.clientY).find(x=>x.dataset&&x.dataset.lid&&x.dataset.lid.startsWith(drag.kind+":")&&x!==drag.el&&!x.classList.contains("ghost"));
   if(under){const r=under.getBoundingClientRect();drag.after=e.clientX>r.left+r.width/2;drag.target=under.dataset.lid.split(":")[1];under.classList.add("droptarget");if(drag.after)under.classList.add("after")}else drag.target=null;
 },{passive:false});
-const endDrag=()=>{if(!drag)return;const d=drag;drag=null;d.ghost.remove();d.el.classList.remove("dragging");if(d.target)moveBefore(d.kind,d.id,d.target,d.after);else render()};
+const endDrag=()=>{
+  pend=null;
+  if(rsz){const r=rsz;rsz=null;r.el.classList.remove("resizing");if(r.nw!==r.w){state.layout.sizes[r.id]=r.nw;storeLayout(false)}render();return}
+  if(!drag)return;const d=drag;drag=null;d.ghost.remove();d.el.classList.remove("dragging");if(d.target)moveBefore(d.kind,d.id,d.target,d.after);else render()};
 document.addEventListener("pointerup",endDrag);document.addEventListener("pointercancel",endDrag);
 
 const PROJECT_STAGES=["Downpayment","Ordering","Scheduled","Installing","Awaiting loan release","Completed"];
@@ -2112,6 +2127,7 @@ document.addEventListener("click",async e=>{
     if(a==="done"){finishEdit();render();return}
     if(a==="add"){openAddPanel();return}
     if(a==="reset"){state.layout=cleanLayout(null);state.page=0;storeLayout(false);render();toast("Back to the default layout");return}}
+  const sz=T.closest("[data-size]");if(sz){const [id,d]=sz.dataset.size.split(":");setSize(id,+d);return}
   const mv=T.closest("[data-move]");if(mv){const [k,id,d]=mv.dataset.move.split(":");moveItem(k,id,+d);return}
   const rm=T.closest("[data-remove]");if(rm){const [k,id]=rm.dataset.remove.split(":");removeItem(k,id);return}
   if(state.edit&&T.closest("#dash")&&!T.closest("[data-period]"))return;
