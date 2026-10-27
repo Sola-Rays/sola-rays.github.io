@@ -790,12 +790,10 @@ html.modal-open .app{pointer-events:none}
   .mrow{grid-template-columns:96px minmax(0,1fr) 84px}.mrow>span:nth-child(3){display:none}
   .mtable.full .mrow{grid-template-columns:minmax(0,1fr) 84px}.mtable.full .mrow>span:nth-child(2){display:none}
   .pkgrid,.c2pk.many .pkgrid{grid-template-columns:minmax(0,1fr);grid-template-rows:none;grid-auto-rows:max-content;overflow-y:auto;align-content:start}
-  .pkcard{flex-direction:row;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:10px 12px}
-  .pkcard::before{left:0;right:auto;top:12px;bottom:12px;width:3px;height:auto;border-radius:0 3px 3px 0}
-  .pkh{width:100%}.pkname{font-size:16px}
-  .pkeq,.pkstats{display:none}
-  .pkprice{margin:0;border:0;padding:0;flex:1;min-width:0}.pkprice b{font-size:19px}.pkprice span{display:none}
-  .pkact{flex:none}.pkact .btn:first-child{flex:none}
+  .pkcard{padding:10px 12px;gap:6px}
+  .pkname{font-size:16px}
+  .pkstats{display:none}
+  .pkprice b{font-size:19px}
   .pkadd{min-height:56px;flex-direction:row}.pkadd b{width:32px;height:32px;margin:0}
   .pkbar{padding:10px 12px}.pkcmp{display:none}
   .pkgo>span{display:none}.pkgo .hrow{flex-wrap:nowrap}.pkgo .hrow .btn{flex:1}
@@ -908,3 +906,27 @@ html.modal-open .app{pointer-events:none}
 .kpi .ectl>*{width:26px;height:26px}
 .editing .kpi .spark{visibility:hidden}
 .editing .kpi{min-height:84px}
+
+/* package cards: pick components right on the card; price and buttons always visible */
+.pkcard{display:flex;flex-direction:column;gap:8px}
+.pkbody{flex:1 1 auto;min-height:0;overflow:hidden;display:flex;flex-direction:column;gap:6px}
+.pkf{display:flex;flex-direction:column;gap:2px;margin:0;min-width:0}
+.pkf>span{font-size:11px;font-weight:700;color:var(--muted);display:flex;justify-content:space-between;gap:6px;white-space:nowrap;overflow:hidden}
+.pkf>span em{font-style:normal;font-weight:600;color:var(--faint);overflow:hidden;text-overflow:ellipsis}
+.pkf .form-select{min-height:34px;padding:4px 30px 4px 9px;font-size:13px;border-radius:9px;background-position:right 8px center}
+.pkf2{display:grid;grid-template-columns:minmax(0,1fr) 74px;gap:6px}
+.pkfoot{flex:none;display:flex;align-items:flex-end;justify-content:space-between;gap:8px;border-top:1px solid var(--line);padding-top:7px;min-width:0}
+.pkfoot .pkprice{margin:0;border:0;padding:0;min-width:0}
+.pkfoot .pkprice b{font-size:22px}
+.pkact{flex:none;display:flex;gap:4px}
+.pkact .btn{min-height:32px;padding:4px 9px}
+.pkact .btn:first-child{flex:none}
+.c2pk.many .pkstats{display:none}
+.c2pk.many .pkfoot .pkprice b{font-size:19px}
+.c2pk.many .pkcard{padding:10px 12px;gap:6px}
+.c2pk.many .pkf>span{font-size:10.5px}
+.warnc{color:var(--sol);font-style:normal}
+.pkbar{padding:10px 14px}
+.pkinfo b{font-size:14px}
+.sugn{display:flex;align-items:center;gap:4px;margin:0}.sugn>span{font-size:12px;color:var(--faint);font-weight:600}
+.sugn .form-select{min-height:34px;width:64px;padding:4px 26px 4px 10px;font-size:13px;border-radius:10px;background-position:right 8px center}
