@@ -68,7 +68,7 @@ queueMicrotask(()=>{TABS.Calendar.fields.find(f=>f[0]==="Type")[3]=EVENT_TYPES.m
 const state={view:"home",sheetId:null,data:{Clients:[],Projects:[],Suppliers:[],Calendar:[],Settings:[]},heads:{},loaded:false,
   filter:{clients:"All",projects:"All",suppliers:"All"},q:{clients:"",projects:"",suppliers:""},
   error:null,sheetIds:{},period:"12",pview:"list",cal:{month:"",sel:"",hidden:[]},
-  page:0,edit:false,cb:"type",sel:null,detail:false,cached:false,settingsOK:true};
+  supplier:"",edit:false,cb:"type",sel:null,detail:false,cached:false,settingsOK:true};
 
 const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -293,7 +293,7 @@ function settingsView(){
   const sheet=`https://docs.google.com/spreadsheets/d/${DEFAULT_SHEET}/edit`;
   const standalone=matchMedia("(display-mode: standalone)").matches||navigator.standalone;
   return `<div class="vw setup-wrap"><div class="card setup"><div class="card-body">
-  <div class="brand big">${SUN}<span><span class="s">Sola</span>Rays</span></div>
+  <div class="brand big"><span class="bn"><span class="s">Sola</span>Rays</span><small>Business Dashboard</small></div>
   <h1>Database</h1>
   <p class="sub">Connect this device to your Google Sheet through the SolaRays Apps Script. Enter both once per device; they stay saved on this device only.</p>
   <div class="row g-3">
@@ -629,9 +629,9 @@ const PANEL_META={
   sources:["Leads by source","Which source brings clients who sign",false],
   balances:["Balances to collect","Active jobs with money still owed",false]
 };
-const KPI_DEFAULT=["revenue","collect","quoteRate","pending","gsisWait","active","clients","kwp","collectRate","profit","margin","avgDeal","daysToSign","gsisShare","installDays","jobsWeek","topSource"];
-const PANEL_DEFAULT=["contracts","pipeline","upnext","pendingList","funnel","gsisList","clientsBy","kwpChart","sources","balances"];
-const LKEY="srv2.layout";
+const KPI_DEFAULT=["revenue","collect","quoteRate","pending","gsisWait","active","profit","jobsWeek"];
+const PANEL_DEFAULT=["contracts","pipeline","upnext","pendingList","funnel","gsisList","clientsBy"];
+const LKEY="srv2.layout.one";const SKEY="dashboard.layout.one";
 function cleanLayout(L){
   const k=Array.isArray(L&&L.kpis)?L.kpis.filter((id,i,a)=>KPI_META[id]&&a.indexOf(id)===i):KPI_DEFAULT.slice();
   const p=Array.isArray(L&&L.panels)?L.panels.filter((id,i,a)=>PANEL_META[id]&&a.indexOf(id)===i):PANEL_DEFAULT.slice();
@@ -640,57 +640,36 @@ function cleanLayout(L){
 state.layout=(()=>{try{return cleanLayout(JSON.parse(lsGet(LKEY)||"null"))}catch(e){return cleanLayout(null)}})();
 function applyLayoutFromSheet(){
   if(state.edit)return;
-  const row=(state.data.Settings||[]).find(r=>r.Key==="dashboard.layout");if(!row)return;
+  const row=(state.data.Settings||[]).find(r=>r.Key===SKEY);if(!row)return;
   try{const L=cleanLayout(JSON.parse(row.Value));if((L.at||0)>=(state.layout.at||0)){state.layout=L;lsSet(LKEY,JSON.stringify(L))}}catch(e){}
 }
 function storeLayout(sync){
   state.layout.at=Date.now();lsSet(LKEY,JSON.stringify(state.layout));
-  if(sync&&cfg.api)saveSetting("dashboard.layout",JSON.stringify(state.layout));
+  if(sync&&cfg.api)saveSetting(SKEY,JSON.stringify(state.layout));
 }
 
-/* How many tiles and panels fit on this screen without scrolling */
-function dashGrid(){
-  const w=innerWidth,h=innerHeight,phone=w<600;
-  const pcols=w>=1100?3:w>=700?2:1;
-  const kcols=Math.max(2,Math.min(6,Math.floor(w/190)));
-  let krows=phone?2:(h>=1000&&w<1100?2:1);
-  const top=phone?54:60,bottom=phone?64:0,head=phone?44:54,pager=30,pad=phone?20:28,gap=phone?10:12;
-  const kh=phone?64:(h<760?80:92);
-  let avail=h-top-bottom-head-pager-pad-gap*3-krows*kh-(krows-1)*8;
-  if(avail<170&&krows>1){krows=1;avail+=kh+8}
-  const minH=w>=700?210:220;
-  const prows=Math.max(1,Math.min(3,Math.floor((avail+gap)/(minH+gap))));
-  const availMain=h-top-bottom-head-pager-pad-gap*2;
-  return {pcols,prows,kcols,krows,kcap:kcols*krows,phone,availMain};
-}
-function paginate(G){
-  const kpis=state.layout.kpis,panels=state.layout.panels;
-  const kp=[];for(let i=0;i<kpis.length;i+=G.kcap)kp.push(kpis.slice(i,i+G.kcap));
-  const pp=[];
-  const fresh=()=>{const pgx={items:[],grid:Array.from({length:G.prows},()=>Array(G.pcols).fill(false))};pp.push(pgx);return pgx};
-  const place=(pgx,id,span)=>{for(let r=0;r<G.prows;r++)for(let c=0;c+span<=G.pcols;c++){if(pgx.grid[r].slice(c,c+span).every(x=>!x)){for(let k=0;k<span;k++)pgx.grid[r][c+k]=true;pgx.items.push({id,r,c,span});return true}}return false};
-  /* first page with room: a wide panel that doesn't fit moves on, and smaller ones after it fill the gap */
-  panels.forEach(id=>{const span=Math.min(G.pcols,PANEL_META[id][2]?2:1);if(!pp.some(pgx=>place(pgx,id,span)))place(fresh(),id,span)});
-  pp.forEach(pgx=>pgx.items.sort((a,b)=>a.r-b.r||a.c-b.c));
-  const n=Math.max(kp.length,pp.length,1);
-  return Array.from({length:n},(_,i)=>({kpis:kp[i]||[],panels:pp[i]?pp[i].items:[]}));
-}
-
-/* Phones: page 1 is an overview (4 KPIs and your first panel), then pages of KPI tiles, then panels */
-function paginatePhone(G){
-  const K=state.layout.kpis.slice(),P=state.layout.panels.slice(),H=G.availMain,kr=80,pm=210;
-  const pages=[];let first=true;
-  while(K.length||P.length){
-    let h=H+10;const pg={kpis:[],panels:[]};
-    const maxRows=first?2:Math.max(1,Math.floor(h/kr));
-    let rows=0;while(K.length&&rows<maxRows){pg.kpis.push(...K.splice(0,G.kcols));rows++;h-=kr}
-    while(P.length&&h>=pm){pg.panels.push(P.shift());h-=pm}
-    if(!pg.kpis.length&&!pg.panels.length)pg.panels.push(P.shift());
-    pg.panels=pg.panels.map((id,i)=>({id,r:i,c:0,span:1}));
-    pages.push(pg);first=false;
+/* Everything on one screen: the more widgets you show, the smaller each one gets */
+function dashFit(nK,panels){
+  const m=$("#main"),phone=innerWidth<700;
+  const W=(m&&m.clientWidth?m.clientWidth:innerWidth)-(phone?24:36);
+  const H=(m&&m.clientHeight?m.clientHeight:innerHeight)-(phone?20:30);
+  if(phone||H<430)return {phone:true,kcols:phone?2:4,pcols:phone?1:2,prows:panels.length,tight:false};
+  const kmax=Math.max(2,Math.min(9,Math.floor((W+10)/150)));
+  const krows=nK?Math.ceil(nK/kmax):0,kcols=krows?Math.ceil(nK/krows):1;
+  const kh=krows>1?(H<760?66:74):(H<760?80:92);
+  const head=50,gap=12;
+  const ph=H-head-gap-(krows?krows*kh+(krows-1)*8+gap:0);
+  let best=null;
+  for(let c=1;c<=5;c++){
+    const cells=panels.reduce((a,id)=>a+(PANEL_META[id][2]&&c>=3?2:1),0);
+    const rows=Math.max(1,Math.ceil(cells/c));
+    const cw=(W-(c-1)*gap)/c,chh=(ph-(rows-1)*gap)/rows;
+    const score=Math.min(cw/290,chh/215)-(rows*c-cells)*0.09;
+    if(!best||score>best.score)best={c,rows,score,cw,chh};
   }
-  return pages.length?pages:[{kpis:[],panels:[]}];
+  return {phone:false,kcols,krows,pcols:best.c,prows:best.rows,tight:best.chh<165||best.cw<215};
 }
+
 function ectl(kind,id){
   if(!state.edit)return "";
   return `<div class="ectl"><span class="grip" data-drag="${kind}:${id}" title="Drag to move" aria-hidden="true">${UI.grip}</span><button type="button" data-move="${kind}:${id}:-1" aria-label="Move earlier">${UI.left}</button><button type="button" data-move="${kind}:${id}:1" aria-label="Move later">${UI.right}</button><button type="button" class="rm" data-remove="${kind}:${id}" aria-label="Remove">${UI.x}</button></div>`;
@@ -717,7 +696,7 @@ function panelBody(id,D){
     const at=list=>D.Clients.filter(c=>list.includes(D.st(c))).length;
     const fun=[["Clients",D.Clients.length,COL.blue],["Consulted",at(["Consulted","Quoted","Accepted","Signed","Lost"]),COL.sky],["Quoted",at(["Quoted","Accepted","Signed","Lost"]),COL.lav],["Signed",at(["Signed"]),COL.sol],["Completed",D.done.length,COL.green]];
     const mx=Math.max(1,fun[0][1]);
-    return {sub:"Conversion",go:"clients",body:`<div class="cbody funnel">${fun.map(([n,v,c],i)=>{const pct=i&&fun[i-1][1]?Math.round(v/fun[i-1][1]*100):null;return `<div class="fstep" style="animation-delay:${i*90}ms;width:${Math.max(46,v/mx*100).toFixed(0)}%;background:${c}"><span>${n}</span><b>${v}${pct!=null?" · "+pct+"%":""}</b></div>`}).join("")}</div>`};
+    return {sub:"Conversion",go:"clients",body:`<div class="cbody hbars fun">${fun.map(([n,v,c],i)=>{const pct=i&&fun[i-1][1]?Math.round(v/fun[i-1][1]*100):null;return `<div class="hb"><span>${n}</span><div><i style="animation-delay:${i*70}ms;width:${(v/mx*100).toFixed(0)}%;background:${c}"></i></div><b>${v}</b><em>${pct!=null?pct+"%":""}</em></div>`}).join("")}</div>`};
   }
   if(id==="clientsBy"){
     const tabs=[["type","Type"],["town","Town"],["pay","Payment"],["source","Source"]];
@@ -762,26 +741,24 @@ function panelBody(id,D){
 }
 function panelHTML(it,D){
   const P=panelBody(it.id,D);const title=P.title||PANEL_META[it.id][0];const go=state.edit?"":P.go;
-  return `<section class="card pnl p-${it.id}${go?" tap":""}" data-lid="panel:${it.id}" ${go?`data-goto="${go}" tabindex="0"`:""} style="grid-row:${it.r+1};grid-column:${it.c+1} / span ${it.span}">${ectl("panel",it.id)}<div class="ch"><h2>${esc(title)}</h2><span>${esc(P.sub||"")}</span></div>${P.body}</section>`;
+  return `<section class="card pnl p-${it.id}${go?" tap":""}" data-lid="panel:${it.id}" ${go?`data-goto="${go}" tabindex="0"`:""} style="grid-column:span ${it.span}">${ectl("panel",it.id)}<div class="ch"><h2>${esc(title)}</h2><span>${esc(P.sub||"")}</span></div>${P.body}</section>`;
 }
 function homeView(){
-  const D=dashCalc(),K=kpiDefs(D),G=dashGrid(),pages=G.phone?paginatePhone(G):paginate(G);
-  state.page=Math.max(0,Math.min(state.page,pages.length-1));
-  const pg=pages[state.page];
+  const D=dashCalc(),K=kpiDefs(D),L=state.layout,F=dashFit(L.kpis.length,L.panels);
   const hr=new Date().getHours();const greet=hr<12?"Good morning":hr<18?"Good afternoon":"Good evening";
   const date=new Date().toLocaleDateString("en-PH",{weekday:"short",month:"short",day:"numeric"});
   const seg=[["30","30 days"],["12","12 mo"],["all","All"]].map(([k,l])=>`<button type="button" class="btn${state.period===k?" on":""}" data-period="${k}" aria-pressed="${state.period===k}">${l}</button>`).join("");
   const acts=state.edit
-    ?`<span class="edithint">Drag the handle or use the arrows to move · × to remove</span><button type="button" class="btn btn-line" data-dact="add">${UI.plus}<span class="lbl">Add</span></button><button type="button" class="btn btn-line" data-dact="reset">${UI.reset}<span class="lbl">Reset</span></button><button type="button" class="btn btn-sol" data-dact="done">Done</button>`
-    :`<div class="seg" role="group" aria-label="Period">${seg}</div><button type="button" class="iconbtn" data-dact="edit" aria-label="Edit dashboard" title="Edit dashboard">${UI.edit}</button><button class="btn btn-line hide-sm" type="button" data-new="Projects">+ Project</button><button class="btn btn-sol hide-sm" type="button" data-new="Clients">+ Client</button>`;
-  const kRows=pg.kpis.length?(G.phone?Math.ceil(pg.kpis.length/G.kcols):Math.min(G.krows,Math.ceil(pg.kpis.length/G.kcols))):0;
-  const pager=pages.length>1?`<div class="pager"><button type="button" class="iconbtn sm" data-page="${state.page-1}" ${state.page?"":"disabled"} aria-label="Previous page">${UI.left}</button>${pages.map((_,i)=>`<button type="button" class="pdot${i===state.page?" on":""}" data-page="${i}" aria-label="Page ${i+1}"${i===state.page?' aria-current="true"':""}></button>`).join("")}<button type="button" class="iconbtn sm" data-page="${state.page+1}" ${state.page<pages.length-1?"":"disabled"} aria-label="Next page">${UI.right}</button></div>`:"";
-  const empty=!state.layout.kpis.length&&!state.layout.panels.length?`<div class="empty big">Your dashboard is empty. Tap Edit, then Add to choose KPIs and panels.</div>`:"";
-  return `<div class="vw v-home${state.edit?" editing":""}" id="dash">
-    <div class="dhead"><div class="dh-l"><h1><span class="gl">${greet}</span><span class="gs">Hi</span>, Raymund</h1><span class="sub">${date}${pages.length>1?` · Page ${state.page+1} of ${pages.length}`:""}</span></div><div class="acts">${acts}</div></div>
-    ${kRows?`<div class="kgrid" style="--kc:${G.kcols};--kr:${kRows}">${pg.kpis.map(id=>kpiHTML(id,K[id])).join("")}</div>`:""}
-    ${pg.panels.length?`<div class="pgrid" style="--pc:${G.pcols};--pr:${G.phone?pg.panels.length:G.prows}">${pg.panels.map(it=>panelHTML(it,D)).join("")}</div>`:`<div class="pgrid none"></div>`}
-    ${empty}${pager}
+    ?`<span class="edithint">Drag the handle or use the arrows to move · × to remove</span><button type="button" class="btn btn-line" data-dact="add">${UI.plus}<span class="lbl">Add widget</span></button><button type="button" class="btn btn-line" data-dact="reset">${UI.reset}<span class="lbl">Reset</span></button><button type="button" class="btn btn-sol" data-dact="done">Done</button>`
+    :`<div class="seg" role="group" aria-label="Period">${seg}</div><button type="button" class="iconbtn" data-dact="edit" aria-label="Edit dashboard widgets" title="Edit widgets">${UI.edit}</button><button class="btn btn-line hide-sm" type="button" data-new="Projects">+ Project</button><button class="btn btn-sol hide-sm" type="button" data-new="Clients">+ Client</button>`;
+  const empty=!L.kpis.length&&!L.panels.length?`<div class="empty big">Your dashboard is empty. Tap the pencil, then Add widget.</div>`:"";
+  const panels=L.panels.map(id=>panelHTML({id,span:PANEL_META[id][2]&&F.pcols>=3?2:1},D)).join("");
+  return `<div class="vw v-home${state.edit?" editing":""}${F.phone?" phone":""}${F.tight?" tight":""}" id="dash">
+    <div class="dhead"><div class="dh-l"><h1><span class="gl">${greet}</span><span class="gs">Hi</span>, Raymund</h1><span class="sub">${date}</span></div><div class="acts">${acts}</div></div>
+    ${state.edit&&F.tight?`<div class="fitnote">Your screen is full, so the widgets are getting small. Remove one or two for more room.</div>`:""}
+    ${L.kpis.length?`<div class="kgrid${F.krows>1?" multi":""}" style="--kc:${F.kcols}">${L.kpis.map(id=>kpiHTML(id,K[id])).join("")}</div>`:""}
+    ${L.panels.length?`<div class="pgrid" style="--pc:${F.pcols}">${panels}</div>`:""}
+    ${empty}
   </div>`;
 }
 
@@ -800,7 +777,7 @@ function openAddPanel(){
   const cats=["Money","Sales","Operations","Marketing"];
   const L=state.layout;
   $("#modalRoot").innerHTML=`<div class="sheet" id="sheet"><div class="box" role="dialog" aria-modal="true" aria-labelledby="addTitle">
-   <div class="hd"><div><h2 id="addTitle">Add or remove</h2><div class="idl">Switch on what you want on your dashboard. New items go at the end; extra items go to the next page.</div></div><button class="x" type="button" data-close aria-label="Close">×</button></div>
+   <div class="hd"><div><h2 id="addTitle">Dashboard widgets</h2><div class="idl">Switch on what you want to see. Everything stays on one screen, so the more you switch on, the smaller each widget gets. New ones are added at the end.</div></div><button class="x" type="button" data-close aria-label="Close">×</button></div>
    <div class="addlist">${cats.map(c=>`<h3>${c} KPIs</h3>${Object.entries(KPI_META).filter(([,m])=>m[0]===c).map(([id,m])=>sw("kpi",id,m[1],m[2],L.kpis.includes(id))).join("")}`).join("")}
    <h3>Panels</h3>${Object.entries(PANEL_META).map(([id,m])=>sw("panel",id,m[0],m[1]+(m[2]?" · wide":""),L.panels.includes(id))).join("")}</div>
    <div class="actions"><div></div><button class="btn btn-sol" type="button" data-close>Done</button></div></div></div>`;
@@ -829,11 +806,6 @@ document.addEventListener("pointermove",e=>{
 },{passive:false});
 const endDrag=()=>{if(!drag)return;const d=drag;drag=null;d.ghost.remove();d.el.classList.remove("dragging");if(d.target)moveBefore(d.kind,d.id,d.target,d.after);else render()};
 document.addEventListener("pointerup",endDrag);document.addEventListener("pointercancel",endDrag);
-/* swipe left and right between dashboard pages on touch screens */
-let swipe=null;
-document.addEventListener("touchstart",e=>{if(state.view!=="home"||state.edit||e.touches.length!==1||$("#modalRoot").innerHTML)return;const t=e.touches[0];swipe={x:t.clientX,y:t.clientY,t:Date.now()}},{passive:true});
-document.addEventListener("touchend",e=>{if(!swipe)return;const t=e.changedTouches[0],dx=t.clientX-swipe.x,dy=t.clientY-swipe.y;const s=swipe;swipe=null;
-  if(Date.now()-s.t<600&&Math.abs(dx)>60&&Math.abs(dx)>Math.abs(dy)*1.5){const n=document.querySelectorAll(".pdot").length;if(!n)return;const p=state.page+(dx<0?1:-1);if(p>=0&&p<n){state.page=p;render()}}},{passive:true});
 
 const PROJECT_STAGES=["Downpayment","Ordering","Scheduled","Installing","Awaiting loan release","Completed"];
 const STAGE_COLOR={"Downpayment":"#FF7A59","Ordering":"#B9A6FF","Scheduled":"#6CB4FF","Installing":"#FFB612","Awaiting loan release":"#3DD6C6","Completed":"#4FD18B"};
@@ -891,11 +863,15 @@ function listView(name){
   const q=state.q[k].toLowerCase();
   const all=state.data[name];
   const groupOf=r=>r[t.filterField];
-  let rows=all.filter(r=>(state.filter[k]==="All"||groupOf(r)===state.filter[k])&&(!q||Object.values(r).join(" ").toLowerCase().includes(q)));
+  const names=[...new Set(all.map(r=>String(r.Supplier||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  if(state.supplier&&!names.includes(state.supplier))state.supplier="";
+  const bySup=state.supplier?all.filter(r=>String(r.Supplier||"").trim()===state.supplier):all;
+  let rows=bySup.filter(r=>(state.filter[k]==="All"||groupOf(r)===state.filter[k])&&(!q||Object.values(r).join(" ").toLowerCase().includes(q)));
+  const supSel=`<label class="supsel"><span>Supplier</span><select class="form-select" data-supfilter aria-label="Supplier"><option value="">All suppliers · ${all.length}</option>${names.map(n=>`<option value="${esc(n)}" ${n===state.supplier?"selected":""}>${esc(n)} · ${all.filter(r=>String(r.Supplier||"").trim()===n).length}</option>`).join("")}</select></label>`;
   rows.sort((a,b)=>String(a.Item).localeCompare(String(b.Item))||num(a.SRP)-num(b.SRP));
-  return `<div class="vw v-list v-${k}">`+header(name,`${all.length} items · Your buying prices for quoting`,`<button class="btn btn-sol" type="button" data-new="${name}">${UI.plus}<span class="lbl">Add item</span></button>`)+
+  return `<div class="vw v-list v-${k}">`+header(name,state.supplier?`${bySup.length} items from ${esc(state.supplier)}`:`${all.length} items from ${names.length} suppliers · Your buying prices`,`${supSel}<button class="btn btn-sol" type="button" data-new="${name}">${UI.plus}<span class="lbl">Add item</span></button>`)+
   `<div class="toolbar">${searchHTML(k,"Search brand, spec or supplier")}</div>
-   ${chipsHTML(k,t.filterOpts,all,groupOf)}
+   ${chipsHTML(k,t.filterOpts,bySup,groupOf)}
    <div class="vscroll" data-keep="${k}"><div class="list grid2">${rows.length?rows.map(r=>itemHTML(name,r)).join(""):`<div class="empty">${all.length?"Nothing matches this search or filter.":`No ${name.toLowerCase()} yet. Tap Add to create the first one; it is saved to the ${t.sheet} tab of your sheet.`}</div>`}</div></div></div>`;
 }
 
@@ -2138,7 +2114,6 @@ document.addEventListener("click",async e=>{
     if(a==="reset"){state.layout=cleanLayout(null);state.page=0;storeLayout(false);render();toast("Back to the default layout");return}}
   const mv=T.closest("[data-move]");if(mv){const [k,id,d]=mv.dataset.move.split(":");moveItem(k,id,+d);return}
   const rm=T.closest("[data-remove]");if(rm){const [k,id]=rm.dataset.remove.split(":");removeItem(k,id);return}
-  const pg=T.closest("[data-page]");if(pg&&!pg.disabled){state.page=+pg.dataset.page;render();return}
   if(state.edit&&T.closest("#dash")&&!T.closest("[data-period]"))return;
   const cb=T.closest("[data-cb]");if(cb){e.stopPropagation();state.cb=cb.dataset.cb;lsSet("srv2.cb",state.cb);render();return}
   /* clients */
@@ -2151,7 +2126,7 @@ document.addEventListener("click",async e=>{
   const of=T.closest("[data-open-file]");if(of&&!T.closest(".sheet,.viewer")){openFile(of.dataset.openFile,of.dataset.kind);return}
   /* navigation and lists */
   const v=T.closest("[data-view]");if(v){if(state.edit)finishEdit();state.view=v.dataset.view;if(state.view==="clients")state.detail=false;lsSet("solarays.view",state.view);render();return}
-  const n=T.closest("[data-new]");if(n){openForm(n.dataset.new,null,n.dataset.date?{Date:n.dataset.date}:undefined);return}
+  const n=T.closest("[data-new]");if(n){const pre=n.dataset.date?{Date:n.dataset.date}:n.dataset.new==="Suppliers"&&state.supplier?{Supplier:state.supplier}:undefined;openForm(n.dataset.new,null,pre);return}
   const ed=T.closest("[data-edit]");if(ed){const rec=state.data[ed.dataset.edit].find(r=>r._row==ed.dataset.row);if(rec)openForm(ed.dataset.edit,rec);return}
   const g=T.closest("[data-goto]");if(g&&g.dataset.goto){const i=g.dataset.goto.indexOf(":");const vw=i<0?g.dataset.goto:g.dataset.goto.slice(0,i),fl=i<0?"":g.dataset.goto.slice(i+1);
     state.view=vw;if(fl&&["clients","projects","suppliers"].includes(vw))state.filter[vw]=fl;if(vw==="clients"){state.detail=false;state.sel=null}lsSet("solarays.view",vw);render();return}
@@ -2167,6 +2142,7 @@ document.addEventListener("click",async e=>{
   if(a&&a.dataset.act==="back"){state.detail=false;render();return}
   if(a&&a.dataset.act==="reload"){navigator.serviceWorker&&navigator.serviceWorker.getRegistration().then(r=>{if(r&&r.waiting)r.waiting.postMessage({type:"skip"});else location.reload()});return}
 });
+document.addEventListener("change",e=>{const s=e.target.closest&&e.target.closest("[data-supfilter]");if(!s)return;state.supplier=s.value;lsSet("srv2.supplier",state.supplier);render()});
 document.addEventListener("input",e=>{
   const s=e.target.closest("[data-search]");if(!s)return;
   const k=s.dataset.search;state.q[k]=s.value;const pos=s.selectionStart;render();const el=document.getElementById("q-"+k);if(el){el.focus();try{el.setSelectionRange(pos,pos)}catch(x){}}
@@ -2181,7 +2157,7 @@ window.addEventListener("wheel",e=>{if(e.ctrlKey&&lockedNow())e.preventDefault()
 const setVH=()=>document.documentElement.style.setProperty("--vh",(window.visualViewport?visualViewport.height:innerHeight)+"px");
 let lastGrid="",lastNarrow=innerWidth<700,resizeT;
 window.addEventListener("resize",()=>{setVH();clearTimeout(resizeT);resizeT=setTimeout(()=>{
-  const gNow=JSON.stringify(dashGrid()),nNow=innerWidth<700;
+  const gNow=innerWidth+"x"+innerHeight,nNow=innerWidth<700;
   if(state.view==="home"&&gNow!==lastGrid){lastGrid=gNow;if(!drag)render();return}
   if(state.view==="clients"&&nNow!==lastNarrow){lastNarrow=nNow;render();return}
   lastGrid=gNow;lastNarrow=nNow;
@@ -2192,11 +2168,11 @@ $("#settingsBtn").onclick=()=>{if(state.edit)finishEdit();state.view="settings";
 /* ---------- boot: show the saved copy at once, then refresh from the sheet ---------- */
 setVH();
 loadCalc();
-{const p=lsGet("solarays.period");if(["30","12","all"].includes(p))state.period=p;if(lsGet("solarays.pview")==="board")state.pview="board";const cbv=lsGet("srv2.cb");if(["type","town","pay","source"].includes(cbv))state.cb=cbv}
+{const p=lsGet("solarays.period");if(["30","12","all"].includes(p))state.period=p;if(lsGet("solarays.pview")==="board")state.pview="board";const cbv=lsGet("srv2.cb");state.supplier=lsGet("srv2.supplier")||"";if(["type","town","pay","source"].includes(cbv))state.cb=cbv}
 state.cal.sel=today();state.cal.month=today().slice(0,7);try{const h=JSON.parse(lsGet("solarays.calHidden")||"[]");if(Array.isArray(h))state.cal.hidden=h}catch(e){}
 const sv=lsGet("solarays.view");if(sv&&VIEWS.some(x=>x[0]===sv))state.view=sv;
 if(location.hash&&VIEWS.some(x=>x[0]===location.hash.slice(1)))state.view=location.hash.slice(1);
-lastGrid=JSON.stringify(dashGrid());
+lastGrid=innerWidth+"x"+innerHeight;
 (async()=>{
   if(cfg.api&&cfg.key){await loadCache();if(state.cached)setSync("busy","Updating…")}
   render();
