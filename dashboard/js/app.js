@@ -49,7 +49,7 @@ const TABS={
  Projects:{sheet:"Projects",key:"projects",title:"Project",idField:"ID",idMode:"prefix",prefix:"PR",filterField:"Status",fields:[
   ["ID","ID","hidden"],["Client No.","Client No.","hidden"],["Client","Client","clientpick"],["System (kWp)","System (kWp)","number"],["Panels","Panels","text"],
   ["Inverter","Inverter","text"],["Battery","Battery","text"],["Contract Price","Contract price (₱)","number"],["Job Cost","Job cost (₱) · internal","number"],["Contract Date","Contract date","date"],
-  ["Payment","Payment","select",["Cash","GSIS loan"]],["Amount Received","Amount received (₱)","paid"],["Payments","Payments","hidden"],
+  ["Payment","Payment","select",["Cash","GSIS loan"]],["GSIS Status","GSIS loan status","select",["Applying","For approval","Approved","Released"]],["Amount Received","Amount received (₱)","paid"],["Payments","Payments","hidden"],
   ["Status","Status","select",["Inquiry","Quotation","Consultation","Payment","Schedule","Installation","Complete"]],
   ["Start Date","Start date","date"],["Completion Date","Completion date","date"],["Notes","Notes","textarea"],["Photos","Photos","photos"]]},
  Suppliers:{sheet:"Suppliers",key:"suppliers",title:"Supplier item",idField:null,filterField:"Item",filterOpts:["PV Module","Inverter","Battery","Accessories"],fields:[
@@ -561,7 +561,7 @@ function dashCalc(){
   const inPrev=iso=>B.prevStart&&iso&&iso>=B.prevStart&&iso<B.start;
   const perLabel={"30":"last 30 days","12":"last 12 months","all":"all time"}[per];
   const signed=series(B,Projects,pDate,p=>num(p["Contract Price"]));
-  const payItems=Projects.flatMap(p=>{const logs=paymentLines(p);const logged=logs.reduce((a,x)=>a+x.amt,0);const rest=num(p["Amount Received"])-logged;return [...logs.map(x=>({iso:x.iso,amt:x.amt})),...(rest>0?[{iso:pDate(p),amt:rest}]:[])]});
+  const payItems=Projects.flatMap(p=>{const logs=paymentLines(p);const logged=logs.reduce((a,x)=>a+x.amt,0);const rest=receivedOf(p)-logged;return [...logs.map(x=>({iso:x.iso,amt:x.amt})),...(rest>0?[{iso:pDate(p),amt:rest}]:[])]});
   const collected=series(B,payItems,x=>x.iso,x=>x.amt);
   const done=Projects.filter(p=>p.Status==="Complete");
   const kwpSeries=series(B,done,cDate,p=>num(p["System (kWp)"]));
@@ -574,7 +574,7 @@ function dashCalc(){
   const projIn=Projects.filter(p=>inR(pDate(p)));
   const revenue=projIn.reduce((s,p)=>s+num(p["Contract Price"]),0);
   const prevRev=Projects.filter(p=>inPrev(pDate(p))).reduce((s,p)=>s+num(p["Contract Price"]),0);
-  const recv=projIn.reduce((s,p)=>s+num(p["Amount Received"]),0);
+  const recv=projIn.reduce((s,p)=>s+receivedOf(p),0);
   const rate=revenue?recv/revenue*100:null;
   const doneIn=done.filter(p=>inR(cDate(p)));
   const kwpIn=doneIn.reduce((s,p)=>s+num(p["System (kWp)"]),0);
@@ -589,7 +589,7 @@ function dashCalc(){
   const pending=Clients.filter(c=>st(c)==="Quoted"||st(c)==="Accepted");
   const pendingVal=pending.reduce((s,c)=>s+quoteValue(c),0);
   /* GSIS: installed, loan not yet released (balance still open) */
-  const gsisWait=Projects.filter(p=>p.Payment==="GSIS loan"&&balanceOf(p)>0&&(p.Status==="Installation"||p.Status==="Complete"));
+  const gsisWait=Projects.filter(p=>p.Payment==="GSIS loan"&&gsisOf(p)!=="Released"&&balanceOf(p)>0);
   const gsisWaitBal=gsisWait.reduce((s,p)=>s+balanceOf(p),0);
   const withCost=projIn.filter(p=>num(p["Job Cost"])>0);
   const gp=withCost.reduce((s,p)=>s+num(p["Contract Price"])-num(p["Job Cost"]),0);
@@ -892,11 +892,15 @@ document.addEventListener("pointerup",endDrag);document.addEventListener("pointe
 const PROJECT_STAGES=["Inquiry","Quotation","Consultation","Payment","Schedule","Installation","Complete"];
 /* older sheet values still show in the right place */
 const OLD_STAGE={Downpayment:"Payment",Ordering:"Payment",Scheduled:"Schedule",Installing:"Installation","Awaiting loan release":"Installation",Completed:"Complete"};
-function normStages(){(state.data.Projects||[]).forEach(p=>{const s=String(p.Status||"").trim();if(OLD_STAGE[s])p.Status=OLD_STAGE[s]})}
+function normStages(){const PI=PROJECT_STAGES.indexOf("Payment");(state.data.Projects||[]).forEach(p=>{let s=String(p.Status||"").trim();if(OLD_STAGE[s])s=p.Status=OLD_STAGE[s];if(p._held&&payDone(p)){p.Status=p._held;delete p._held;return}if(!p._held&&PROJECT_STAGES.indexOf(s)>PI&&!payDone(p)){p._held=s;p.Status="Payment"}})}
 const STAGE_COLOR={"Inquiry":"#8FB3D9","Quotation":"#B9A6FF","Consultation":"#3DD6C6","Payment":"#FF7A59","Schedule":"#6CB4FF","Installation":"#FFB612","Complete":"#4FD18B"};
 const shortStage=s=>s;
-const balanceOf=p=>Math.max(0,num(p["Contract Price"])-num(p["Amount Received"]));
-const paidPct=p=>{const c=num(p["Contract Price"]);return c?Math.min(100,Math.round(num(p["Amount Received"])/c*100)):0};
+/* GSIS loan status; if not set yet, finished jobs count as Released and jobs in progress as still Applying */
+const gsisOf=p=>String(p["GSIS Status"]||"").trim()||((p._held||p.Status)==="Complete"||p.Status==="Complete"?"Released":"Applying");
+const receivedOf=p=>p.Payment==="GSIS loan"&&gsisOf(p)!=="Released"?paymentLines(p).reduce((a,x)=>a+x.amt,0):num(p["Amount Received"]);
+const payDone=p=>receivedOf(p)>0;
+const balanceOf=p=>Math.max(0,num(p["Contract Price"])-receivedOf(p));
+const paidPct=p=>{const c=num(p["Contract Price"]);return c?Math.min(100,Math.round(receivedOf(p)/c*100)):0};
 
 function itemHTML(name,r){
   let t="",d="",right="",lead="";
@@ -1029,7 +1033,7 @@ function clientsView(){
 function projectsView(){
   const all=state.data.Projects,f=state.filter.projects,q=state.q.projects.toLowerCase();
   const active=all.filter(p=>p.Status!=="Complete"),done=all.filter(p=>p.Status==="Complete");
-  const contract=all.reduce((s,p)=>s+num(p["Contract Price"]),0),recv=all.reduce((s,p)=>s+num(p["Amount Received"]),0);
+  const contract=all.reduce((s,p)=>s+num(p["Contract Price"]),0),recv=all.reduce((s,p)=>s+receivedOf(p),0);
   const collect=all.reduce((s,p)=>s+balanceOf(p),0),kwp=done.reduce((s,p)=>s+num(p["System (kWp)"]),0);
   const rate=contract?Math.round(recv/contract*100):null;
   const match=p=>f==="All"||(f==="Active"&&p.Status!=="Complete")||(f==="Balance"&&balanceOf(p)>0)||p.Status===f;
@@ -1241,16 +1245,22 @@ function projCard(p,split,on){
   const attr=split?`data-pick-proj="${p._row}"`:`data-edit="Projects" data-row="${p._row}"`;
   return `<button type="button" class="pcard${on?" on":""}" ${attr} style="--c:${col}">
     <span class="avatar" style="background:${col}">${esc(initials(name))}</span>
-    <span class="m"><b>${esc(name)}</b><span>${esc([cl?townOf(cl):"",sys].filter(Boolean).join(" · ")||"No system details yet")}</span>${stepsHTML(p.Status)}<em>${esc(shortStage(p.Status||"No stage"))} · ${esc(when)}</em></span>
+    <span class="m"><b>${esc(name)}</b><span>${esc([cl?townOf(cl):"",sys].filter(Boolean).join(" · ")||"No system details yet")}</span>${stepsHTML(p.Status)}<em>${esc(p.Status==="Payment"&&!payDone(p)?(p.Payment==="GSIS loan"?"GSIS loan · "+gsisOf(p):"Waiting for payment"):shortStage(p.Status||"No stage")+" · "+when)}</em></span>
     <span class="r"><b>${shortPeso(num(p["Contract Price"]))}</b><span class="paybar"><i style="width:${pct}%" class="${pct>=100?"full":""}"></i></span><em class="${pct>=100?"g":bal?"y":""}">${pct>=100?"Paid":pct+"% · bal "+shortPeso(bal)}</em></span></button>`;
 }
 function projDetail(p){
   const cl=clientFor(p),col=STAGE_COLOR[p.Status]||"#5E7590",name=(cl&&cl.Client)||p.Client||"No client";
-  const c=num(p["Contract Price"]),rcv=num(p["Amount Received"]),bal=balanceOf(p),pct=paidPct(p),cost=num(p["Job Cost"]);
+  const c=num(p["Contract Price"]),rcv=receivedOf(p),bal=balanceOf(p),pct=paidPct(p),cost=num(p["Job Cost"]);
   const idx=PROJECT_STAGES.indexOf(p.Status),next=PROJECT_STAGES[idx+1];
   const stages=PROJECT_STAGES;
   const ci=stages.indexOf(p.Status);
-  const stepper=`<div class="pstepper">${stages.map((s,i)=>`<div class="ps ${i<ci?"done":i===ci?"cur":""}" style="--c:${STAGE_COLOR[s]}"><i>${i<ci?"✓":i+1}</i><span>${esc(shortStage(s))}</span></div>`).join("")}</div>`;
+  const gsis=p.Payment==="GSIS loan",waiting=p.Status==="Payment"&&!payDone(p),gs=gsisOf(p);
+  const stepper=`<div class="pstepper">${stages.map((s,i)=>{const w=waiting&&i===ci;return `<div class="ps ${i<ci?"done":i===ci?"cur":""}${w?" wait":""}" style="--c:${w?"var(--sol)":STAGE_COLOR[s]}"><i>${i<ci?"✓":w?"…":i+1}</i><span>${esc(w?(gsis?"GSIS: "+gs:"Waiting payment"):shortStage(s))}</span></div>`}).join("")}</div>`;
+  /* no payment yet: the job can't move on; for GSIS, track the loan until it is released */
+  const GS=["Applying","For approval","Approved","Released"];
+  const payGate=waiting?`<div class="pwait"><div class="pwt"><b>${gsis?`GSIS loan · ${esc(gs)}`:"Waiting for payment"}</b><span>${p._held?`Your sheet says ${esc(p._held)}, but no payment is recorded yet. `:""}${gsis?"Schedule and installation unlock when the GSIS loan is Released or a downpayment is recorded.":"Schedule and installation unlock once a downpayment or full payment is recorded."}</span></div>
+      ${gsis?`<div class="seg gsseg" role="group" aria-label="GSIS loan status">${GS.map(x=>`<button type="button" class="btn${x===gs?" on":""}" data-gsis-set="${p._row}" data-v="${esc(x)}">${esc(x)}</button>`).join("")}</div>`:""}
+      <button type="button" class="btn btn-sol btn-sm" data-edit="Projects" data-row="${p._row}">Record payment</button></div>`:"";
   const pays=paymentLines(p);
   const t=today(),ev=cl?allEvents().filter(e=>e.clientRef===cl):[];
   const up=ev.filter(e=>e.iso>=t&&e.status!=="Cancelled").slice(0,3);
@@ -1260,11 +1270,11 @@ function projDetail(p){
   return `<div class="pdh"><span class="avatar lg" style="background:${col}">${esc(initials(name))}</span><div class="pdn"><h2>${esc(name)}</h2><span>${esc([cl?townOf(cl):"",p.Payment,p.ID].filter(Boolean).join(" · "))}</span></div>
       <div class="pdacts">${tel?`<a class="btn btn-line btn-sm" href="tel:${esc(tel)}">${UI.phone}<span class="lbl">Call</span></a>`:""}${cl?`<button type="button" class="btn btn-line btn-sm" data-client="${cl._row}">${ico("clients")}<span class="lbl">Client</span></button>`:""}<button type="button" class="btn btn-sol btn-sm" data-edit="Projects" data-row="${p._row}">${UI.edit}<span class="lbl">Edit</span></button></div></div>
     ${stepper}
-    ${next&&p.Status!=="Complete"?`<button type="button" class="btn btn-line pnext" data-proj-next="${p._row}" data-to="${esc(next)}" style="--c:${STAGE_COLOR[next]}"><i></i>Move to ${esc(shortStage(next))}</button>`:""}
+    ${payGate}${next&&p.Status!=="Complete"&&!waiting?`<button type="button" class="btn btn-line pnext" data-proj-next="${p._row}" data-to="${esc(next)}" style="--c:${STAGE_COLOR[next]}"><i></i>Move to ${esc(shortStage(next))}</button>`:""}
     <div class="pdgrid2">
       <section class="pbox pmoney"><h3>Payments</h3>
         <div class="pring" style="--p:${pct};--c:${pct>=100?"var(--good)":"var(--sol)"}"><b>${pct}%</b><span>paid</span></div>
-        <div class="pnums">${kv("Contract",peso(c))}${kv("Received",peso(rcv))}<div class="${bal?"y":"g"}"><span>Balance</span><b>${bal?peso(bal):"Fully paid"}</b></div>${cost?`<div class="int"><span>Profit · internal</span><b>${peso(c-cost)} · ${c?Math.round((c-cost)/c*100):0}%</b></div>`:""}</div>
+        <div class="pnums">${kv("Contract",peso(c))}${kv("Received",peso(rcv))}${gsis?kv("GSIS loan",gs):""}<div class="${bal?"y":"g"}"><span>Balance</span><b>${bal?peso(bal):"Fully paid"}</b></div>${cost?`<div class="int"><span>Profit · internal</span><b>${peso(c-cost)} · ${c?Math.round((c-cost)/c*100):0}%</b></div>`:""}</div>
         ${pays.length?`<div class="plog">${pays.slice(-4).reverse().map(x=>`<div><span>${esc(x.iso?fmtDate(x.iso).replace(/, \d{4}$/,""):"")}</span><b>${peso(x.amt)}</b></div>`).join("")}</div>`:`<p class="pnote">No payments logged yet. Tap Edit to add one.</p>`}</section>
       <section class="pbox"><h3>System</h3><div class="pkv">${kv("Size",p["System (kWp)"]?p["System (kWp)"]+" kWp":"")}${kv("Panels",p.Panels)}${kv("Inverter",p.Inverter)}${kv("Battery",p.Battery)}</div>${!p["System (kWp)"]&&!p.Panels&&!p.Inverter?`<p class="pnote">Add the system details in Edit.</p>`:""}</section>
       <section class="pbox"><h3>Dates</h3><div class="pdates">${dates}</div></section>
@@ -2759,6 +2769,9 @@ document.addEventListener("click",async e=>{
   const pn=T.closest("[data-proj-next]");if(pn){const p=state.data.Projects.find(x=>x._row==pn.dataset.projNext);if(p){const to=pn.dataset.to,rec={...p,Status:to};
     if(to==="Installation"&&!toISO(p["Start Date"]))rec["Start Date"]=today();if(to==="Complete"&&!toISO(p["Completion Date"]))rec["Completion Date"]=today();
     if(await saveRecord("Projects",rec,false,p))toast(`${p.Client||"Project"} moved to ${shortStage(to)}`)}return}
+  const gset=T.closest("[data-gsis-set]");if(gset){const p=state.data.Projects.find(x=>x._row==gset.dataset.gsisSet);if(p){const v=gset.dataset.v,rec={...p,"GSIS Status":v};if(v==="Released"){rec.Status=p._held||p.Status;delete rec._held}
+    if(v==="Released"&&!paymentLines(p).length)rec["Amount Received"]=Math.max(num(p["Amount Received"]),num(p["Contract Price"]));
+    if(await saveRecord("Projects",rec,false,p))toast(v==="Released"?`GSIS loan released for ${p.Client||"this project"}: payment received`:`GSIS loan: ${v}`)}return}
   const pe=T.closest("[data-proj-ev]");if(pe){const p=state.data.Projects.find(x=>x._row==pe.dataset.projEv);const cl=p&&clientFor(p);openForm("Calendar",null,{Client:p?p.Client:"","Client No.":p?p["Client No."]:"",Project:p?p.ID:"",Location:cl?cl.Address||"":"",Date:today()});return}
   const oc=T.closest("[data-client]");if(oc){openClient(+oc.dataset.client);return}
   const cg=T.closest("[data-client-go]");if(cg){const c=state.data.Clients.find(x=>x._row==cg.dataset.row);if(!c)return;
