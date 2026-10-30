@@ -1067,14 +1067,77 @@ function parseCoords(t){
   if(!m)return "";const a=+m[1],b=+m[2];if(Math.abs(a)>90||Math.abs(b)>180)return "";
   return `${m[1]}, ${m[2]}`;
 }
-function locateInto(inp,btn){
-  if(!navigator.geolocation){toast("This device can't share its location");return}
-  btn.classList.add("busy");toast("Getting your location… stand at the client's site for best accuracy");
-  navigator.geolocation.getCurrentPosition(p=>{btn.classList.remove("busy");
-    inp.value=`${p.coords.latitude.toFixed(7)}, ${p.coords.longitude.toFixed(7)}`;inp.dispatchEvent(new Event("input",{bubbles:true}));
-    toast(`Location added · accurate to about ${Math.round(p.coords.accuracy)} m`)},
-   e=>{btn.classList.remove("busy");toast(e.code===1?"Location is blocked. Allow location for this site in Settings → Safari (or your browser).":"Couldn't get your location. Try again outdoors.")},
-   {enableHighAccuracy:true,timeout:15000,maximumAge:0});
+const PICK_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4 3 6.5v13L9 17l6 2.5 6-2.5v-13L15 6.5 9 4z"/><path d="M9 4v13M15 6.5v13"/></svg>';
+/* ---------- pick a spot on a map: drag the map so the pin sits on the roof, then tap Use this spot ----------
+   Satellite photos (Esri) or street map (OpenStreetMap); search uses OpenStreetMap. No Google key needed. */
+const MAP_LAYERS={sat:{url:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${z}/${y}/${x}`,label:(z,x,y)=>`https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/${z}/${y}/${x}`,max:19,attr:"Imagery © Esri, Maxar, Earthstar Geographics"},
+  map:{url:(z,x,y)=>`https://tile.openstreetmap.org/${z}/${x}/${y}.png`,max:19,attr:"© OpenStreetMap contributors"}};
+function pickOnMap(inp,address){
+  const start=parseCoords(inp.value);
+  let lat=7.6,lng=126.0,z=10,layer=lsGet("srv2.maplayer")==="map"?"map":"sat";
+  if(start){const [a,b]=start.split(",").map(Number);lat=a;lng=b;z=18}
+  const v=document.createElement("div");v.className="viewer mapv";v.setAttribute("role","dialog");v.setAttribute("aria-label","Pick location on map");
+  v.innerHTML=`<div class="mapbox">
+    <div class="maphd"><form class="mapq"><input class="form-control" type="search" placeholder="Search a place, barangay or town" enterkeyhint="search" value="${esc(start?"":address)}"><button type="submit" class="btn btn-line">${UI.search}</button></form>
+      <div class="mapres" hidden></div></div>
+    <div class="mapwrap"><div class="maptiles"></div><div class="mappin" aria-hidden="true"><svg viewBox="0 0 24 34"><path d="M12 33s10-11.6 10-20A10 10 0 0 0 2 13c0 8.4 10 20 10 20z" fill="#FFB612" stroke="#16212E" stroke-width="1.6"/><circle cx="12" cy="13" r="3.8" fill="#16212E"/></svg></div>
+      <div class="mapzoom"><button type="button" data-mz="1" aria-label="Zoom in">+</button><button type="button" data-mz="-1" aria-label="Zoom out">−</button></div>
+      <div class="maplayer seg"><button type="button" class="btn btn-sol" data-ml="sat">Satellite</button><button type="button" class="btn btn-sol" data-ml="map">Map</button></div>
+      <div class="mapattr"></div><div class="maphint">Drag the map so the pin is on the client's roof</div></div>
+    <div class="mapft"><div class="mapll"><span>Pin location</span><b></b></div><a class="btn btn-line btn-sm" target="_blank" rel="noopener" data-mapg>Check in Google Maps</a><button type="button" class="btn btn-line" data-mapx>Cancel</button><button type="button" class="btn btn-sol" data-mapok>Use this spot</button></div></div>`;
+  document.body.appendChild(v);
+  const wrap=v.querySelector(".mapwrap"),tiles=v.querySelector(".maptiles"),ll=v.querySelector(".mapll b"),g=v.querySelector("[data-mapg]");
+  const T=256,W=()=>T*Math.pow(2,z);
+  const toPx=(la,ln)=>{const s=Math.sin(la*Math.PI/180);return [(ln+180)/360*W(),(0.5-Math.log((1+s)/(1-s))/(4*Math.PI))*W()]};
+  const toLL=(x,y)=>{const n=Math.PI-2*Math.PI*y/W();return [180/Math.PI*Math.atan(Math.sinh(n)),x/W()*360-180]};
+  let cache={};
+  function draw(){
+    const L=MAP_LAYERS[layer];z=Math.max(3,Math.min(L.max,z));
+    const w=wrap.clientWidth,h=wrap.clientHeight,[cx,cy]=toPx(lat,lng),n=Math.pow(2,z);
+    const x0=Math.floor((cx-w/2)/T),x1=Math.floor((cx+w/2)/T),y0=Math.max(0,Math.floor((cy-h/2)/T)),y1=Math.min(n-1,Math.floor((cy+h/2)/T));
+    const keep={};
+    for(let x=x0;x<=x1;x++)for(let y=y0;y<=y1;y++){const xx=((x%n)+n)%n;
+      [["b",L.url],...(L.label?[["l",L.label]]:[])].forEach(([k,u])=>{const id=layer+k+z+"/"+xx+"/"+y;keep[id]=1;let im=cache[id];
+        if(!im){im=document.createElement("img");im.alt="";im.draggable=false;im.className="mt"+(k==="l"?" lbl":"");im.src=u(z,xx,y);tiles.appendChild(im);cache[id]=im}
+        im.style.transform=`translate(${Math.round(x*T-cx+w/2)}px,${Math.round(y*T-cy+h/2)}px)`})}
+    Object.keys(cache).forEach(id=>{if(!keep[id]){cache[id].remove();delete cache[id]}});
+    const t=`${lat.toFixed(7)}, ${lng.toFixed(7)}`;ll.textContent=t;g.href=`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(lat.toFixed(7)+","+lng.toFixed(7))}`;
+    v.querySelector(".mapattr").textContent=L.attr;
+    v.querySelectorAll("[data-ml]").forEach(b=>b.classList.toggle("on",b.dataset.ml===layer));
+  }
+  const setPx=(x,y)=>{const m=W();y=Math.max(0,Math.min(m,y));[lat,lng]=toLL(((x%m)+m)%m,y)};
+  const zoomBy=d=>{z=Math.max(3,Math.min(MAP_LAYERS[layer].max,z+d));draw()};
+  /* drag with a finger or the mouse; pinch or scroll to zoom; double-tap to zoom in there */
+  const pts=new Map();let pinch0=0,lastTap=0,moved=false;
+  wrap.addEventListener("pointerdown",e=>{if(e.target.closest("button"))return;wrap.setPointerCapture(e.pointerId);pts.set(e.pointerId,{x:e.clientX,y:e.clientY});moved=false;
+    if(pts.size===2){const [a,b]=[...pts.values()];pinch0=Math.hypot(a.x-b.x,a.y-b.y)}});
+  wrap.addEventListener("pointermove",e=>{const p=pts.get(e.pointerId);if(!p)return;e.preventDefault();
+    if(pts.size===1){const [cx,cy]=toPx(lat,lng);setPx(cx-(e.clientX-p.x),cy-(e.clientY-p.y));if(Math.abs(e.clientX-p.x)+Math.abs(e.clientY-p.y)>2)moved=true;p.x=e.clientX;p.y=e.clientY;draw()}
+    else if(pts.size===2){p.x=e.clientX;p.y=e.clientY;const [a,b]=[...pts.values()],d=Math.hypot(a.x-b.x,a.y-b.y);moved=true;if(pinch0&&(d/pinch0>1.6||d/pinch0<0.62)){zoomBy(d>pinch0?1:-1);pinch0=d}}});
+  const up=e=>{if(pts.size===1&&!moved){const now=Date.now();if(now-lastTap<320){const r=wrap.getBoundingClientRect(),[cx,cy]=toPx(lat,lng);setPx(cx+e.clientX-r.left-r.width/2,cy+e.clientY-r.top-r.height/2);zoomBy(1)}lastTap=now}
+    pts.delete(e.pointerId);if(pts.size<2)pinch0=0};
+  wrap.addEventListener("pointerup",up);wrap.addEventListener("pointercancel",e=>{pts.delete(e.pointerId)});
+  let wt=0;wrap.addEventListener("wheel",e=>{e.preventDefault();const now=Date.now();if(now-wt<180)return;wt=now;zoomBy(e.deltaY<0?1:-1)},{passive:false});
+  /* search */
+  const res=v.querySelector(".mapres");
+  const go=(a,b,zz)=>{lat=+a;lng=+b;z=zz||17;res.hidden=true;draw()};
+  async function search(q){if(!q.trim())return;res.hidden=false;res.innerHTML=`<div class="mr">Searching…</div>`;
+    try{const r=await fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=6&countrycodes=ph&q=${encodeURIComponent(q)}`,{headers:{"Accept-Language":"en"}});const j=await r.json();
+      res.innerHTML=j.length?j.map(x=>`<button type="button" class="mr" data-go="${x.lat},${x.lon}"><b>${esc(String(x.display_name).split(",")[0])}</b><span>${esc(String(x.display_name).split(",").slice(1,4).join(","))}</span></button>`).join(""):`<div class="mr">No match. Try the barangay and town, e.g. "Poblacion, Monkayo".</div>`;
+    }catch(e){res.innerHTML=`<div class="mr">Search needs internet. You can still drag the map.</div>`}}
+  v.querySelector(".mapq").addEventListener("submit",e=>{e.preventDefault();search(v.querySelector(".mapq input").value)});
+  const close=()=>{v.remove();document.removeEventListener("keydown",esc_)};
+  const esc_=e=>{if(e.key==="Escape"){e.stopPropagation();close()}};document.addEventListener("keydown",esc_);
+  v.addEventListener("click",e=>{
+    const m=e.target.closest("[data-mz]");if(m){zoomBy(+m.dataset.mz);return}
+    const l=e.target.closest("[data-ml]");if(l){layer=l.dataset.ml;lsSet("srv2.maplayer",layer);draw();return}
+    const r=e.target.closest("[data-go]");if(r){const [a,b]=r.dataset.go.split(",");go(a,b,17);return}
+    if(e.target.closest("[data-mapx]")||e.target===v){close();return}
+    if(e.target.closest("[data-mapok]")){inp.value=`${lat.toFixed(7)}, ${lng.toFixed(7)}`;inp.dispatchEvent(new Event("input",{bubbles:true}));close();toast("Location pinned");return}
+  });
+  addEventListener("resize",draw,{once:true});
+  requestAnimationFrame(()=>{draw();if(!start&&address.trim()){/* start near the client's address */
+    fetch(`https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=ph&q=${encodeURIComponent(address)}`).then(r=>r.json()).then(j=>{if(j[0])go(j[0].lat,j[0].lon,16)}).catch(()=>{})}});
 }
 
 /* ---------- Suppliers: your buying prices, and how the Solar Calculator reads each item ---------- */
@@ -1150,7 +1213,7 @@ function suppliersView(){
   const GL={pv:"Panels",inv:"Inverters",bat:"Batteries",acc:"Accessories"};let last="";
   const list=rows.map(r=>{const g=info.get(r).k;const h=f==="All"&&g!==last?`<h3 class="sgh">${GL[g]}</h3>`:"";last=g;return h+supItemHTML(r)}).join("");
   return `<div class="vw v-list v-${k}">`+header(name,state.supplier?`${bySup.length} items from ${esc(state.supplier)}`:`${all.length} items from ${names.length} suppliers · Your buying prices, read by the Solar Calculator`,`${supSel}<button class="btn btn-sol" type="button" data-new="${name}">${UI.plus}<span class="lbl">Add item</span></button>`)+
-  `${ready}${tipHTML}<div class="toolbar">${searchHTML(k,"Search brand, spec or supplier")}</div>${chips}
+  `${ready}<div class="toolbar">${searchHTML(k,"Search brand, spec or supplier")}</div>${chips}
    <div class="vscroll" data-keep="${k}"><div class="list grid2 slist2">${list||`<div class="empty">${all.length?"Nothing matches this search or filter.":"No supplier items yet. Tap Add item; it is saved to the Suppliers tab of your sheet."}</div>`}</div></div></div>`;
 }
 /* live preview in the supplier form: how the calculator will read this item */
@@ -1391,7 +1454,7 @@ function openForm(name,rec,prefill){
     if(type==="time")return `<div class="f"><label for="${id}">${label}</label><input class="form-control" id="${id}" data-k="${esc(key)}" type="time" step="300" value="${esc(parseTime(raw))}"></div>`;
     if(type==="link"){
       const kind=opts;const href=kind==="fb"?fbURL(raw):mapURL(raw,r.Address);
-      return `<div class="f ${kind==="fb"?"full":""}"><label for="${id}">${label}</label><div class="linkin ${kind}"><input class="form-control" id="${id}" data-k="${esc(key)}" type="text" ${kind==="fb"?'inputmode="url" autocapitalize="off" spellcheck="false"':'inputmode="text" autocapitalize="off" autocomplete="off" spellcheck="false" enterkeyhint="done"'} value="${esc(raw)}" placeholder="${kind==="fb"?"facebook.com/username":"7.8255, 126.0485 or paste a Google Maps link"}">${kind==="map"?`<button type="button" class="lbtn loc" data-locate="${id}" aria-label="Use this device's location" title="Use my current location">${GPS_ICON}</button>`:""}<a class="lbtn ${kind}" data-link="${kind}" data-for="${id}" href="${esc(href||"#")}" target="_blank" rel="noopener" aria-label="${kind==="fb"?"Open Facebook profile":"Open in Google Maps"}" ${href?"":'aria-disabled="true"'}>${ICON_LINK[kind]}</a></div></div>`;
+      return `<div class="f ${kind==="fb"?"full":""}"><label for="${id}">${label}</label><div class="linkin ${kind}"><input class="form-control" id="${id}" data-k="${esc(key)}" type="text" ${kind==="fb"?'inputmode="url" autocapitalize="off" spellcheck="false"':'inputmode="text" autocapitalize="off" autocomplete="off" spellcheck="false" enterkeyhint="done"'} value="${esc(raw)}" placeholder="${kind==="fb"?"facebook.com/username":"7.8255, 126.0485 or paste a Google Maps link"}">${kind==="map"?`<button type="button" class="lbtn loc" data-locate="${id}" aria-label="Pick the location on a map" title="Pick on map">${PICK_ICON}</button>`:""}<a class="lbtn ${kind}" data-link="${kind}" data-for="${id}" href="${esc(href||"#")}" target="_blank" rel="noopener" aria-label="${kind==="fb"?"Open Facebook profile":"Open in Google Maps"}" ${href?"":'aria-disabled="true"'}>${ICON_LINK[kind]}</a></div></div>`;
     }
     if(type==="quoted")return `<div class="f"><label for="${id}">Quoted price <span class="hint">From packages</span></label><input class="form-control ro" id="${id}" type="text" readonly tabindex="-1" value=""></div>`;
     if(type==="packages")return `<div class="f full"><label>Packages quoted <span class="hint">Up to ${MAX_PACKAGES} · tap the circle on the package the client chose</span></label><div class="pkgs" id="pkgs"></div></div>`;
@@ -1443,11 +1506,11 @@ function openForm(name,rec,prefill){
   if(proj&&pick)proj.addEventListener("change",()=>{const p=projectById(proj.value);const c=p&&clientFor(p);if(c&&!pick.value){pick.value=c["S.N."];showCard()}});
 
   if(name==="Suppliers")supplierFormHelp(form);
-  /* GPS: tidy typed or pasted coordinates, and fill them from this device's location */
+  /* GPS: tidy typed or pasted coordinates, and pick the spot on a map */
   form.querySelectorAll("[data-locate]").forEach(b=>{const inp=document.getElementById(b.dataset.locate);
     const tidy=()=>{const v=parseCoords(inp.value);if(v&&v!==inp.value){inp.value=v;inp.dispatchEvent(new Event("input",{bubbles:true}))}else if(/goo\.gl|maps\.app/i.test(inp.value))toast("Short map links can't be read here. In Google Maps, drop a pin and copy the numbers at the top.")};
     inp.addEventListener("blur",tidy);inp.addEventListener("paste",()=>setTimeout(tidy,0));
-    b.addEventListener("click",()=>locateInto(inp,b))});
+    b.addEventListener("click",()=>pickOnMap(inp,(form.querySelector('[data-k="Address"]')||{}).value||""))});
   /* rate per kWh = monthly bill ÷ monthly kWh, worked out as you type (2 decimals) */
   {const kw=form.querySelector('[data-k="kWh"]'),bl=form.querySelector('[data-k="Amount"]'),rt=form.querySelector('[data-k="Rate per kWh"]');
    if(kw&&bl&&rt){const upd=()=>{const k=num(kw.value),b=num(bl.value);if(k>0&&b>0)rt.value=(Math.round(b/k*100)/100).toFixed(2)};kw.addEventListener("input",upd);bl.addEventListener("input",upd);if(!String(rt.value).trim())upd();rt.placeholder="Bill ÷ kWh"}}
@@ -1965,7 +2028,7 @@ function c2packages(){
         <label class="pkf"><span>Inverter <em>${r.inv?r.inv.kw+" kW · "+Math.round(r.kwp/r.inv.kw*100)+"% load":"none fits"}</em></span><select class="form-select" data-pkf="${i}:inverter">${opt(cat.inv,c.inverter||"auto",[["auto","Auto · lowest price that fits"],["auto-premium","Auto · longest warranty that fits"]])}</select></label>
         <div class="pkf2"><label class="pkf"><span>Battery <em>${r.batKWh?(Math.round(r.batKWh*100)/100)+" kWh":"none"}</em></span><select class="form-select" data-pkf="${i}:battery">${opt(cat.bat,c.battery||"auto",[["auto","Auto · lowest total cost"],["auto-premium","Auto · longest warranty"],["none","No battery (add later)"]])}</select></label>
         <label class="pkf qty"><span>Qty</span><select class="form-select" data-pkf="${i}:batQty" ${c.battery==="none"?"disabled":""}><option value="" ${bq===""?"selected":""}>×${r.batN||0} auto</option>${[1,2,3,4,5,6].map(n=>`<option value="${n}" ${String(bq)===String(n)?"selected":""}>×${n}</option>`).join("")}</select></label></div>
-        <div class="pkstats">${[["Offset",Math.round(r.offset*100)+"%"],["Savings",shortPeso(r.savings)+"/mo"],["Payback",r.payback>25?"25+ yrs":r.payback.toFixed(1)+" yrs"],["Margin",Math.round(r.margin*100)+"%"]].map(([a,b])=>`<div><span>${a}</span><b>${b}</b></div>`).join("")}</div>
+        <div class="pkstats">${[["Offset",Math.round(r.offset*100)+"%"],["Save/mo",shortPeso(r.savings)],["Payback",r.payback>25?"25+ yrs":r.payback.toFixed(1)+" yrs"],["Margin",Math.round(r.margin*100)+"%"]].map(([a,b])=>`<div><span>${a}</span><b>${b}</b></div>`).join("")}</div>
       </div>
       <div class="pkfoot"><div class="pkprice"><span>${r.mobFee?"Total contract price":"Selling price"}</span><b>${peso(r.contract)}</b></div>
         <div class="pkact"><button type="button" class="btn btn-sol btn-sm" data-pkinfo="${i}" title="Savings, components, ROI and more">Details</button><button type="button" class="btn btn-line btn-sm btn-ic" data-pkedit="${i}" title="Open in Sizing to change more" aria-label="Edit in Sizing">${UI.edit}</button><button type="button" class="btn btn-line btn-sm btn-ic" data-pkrm="${i}" aria-label="Remove package">×</button></div></div>
@@ -2084,6 +2147,21 @@ function pickLadder(cands,n,chosen){
     }
     if(best){chosen.push(best);out.push(best)}
   });
+  /* not enough clearly different coverage levels (a small home, or few battery and inverter sizes in Suppliers):
+     fill the rest with other brand combinations at clearly different prices, so you can still offer up to 6 */
+  const prices=cands.map(c=>c.price),pSpan=Math.max(1,Math.max(...prices)-Math.min(...prices));
+  while(out.length<n){
+    let best=null,bs=Infinity;
+    for(const c of cands){
+      if(chosen.some(x=>x.key===c.key))continue;
+      const pd=Math.min(...chosen.map(x=>Math.abs((x.price!=null?x.price:x.r.contract)-c.price)));
+      if(chosen.length&&pd<3000)continue;
+      let ov=0;chosen.forEach(x=>{if(x.ib&&x.ib===c.ib)ov+=1.2;if(x.bb&&x.bb===c.bb)ov+=1.2;if(x.pb&&x.pb===c.pb)ov+=0.8;if(x.inv===c.inv)ov+=0.8;if(x.bat&&x.bat===c.bat)ov+=0.8;if(x.pv===c.pv)ov+=0.5});
+      const score=ov-Math.min(1,pd/pSpan*3)*2+(c.eff-eLo)/eSpan*1.5+(c.bo&&c.bo.n>3?1:0);
+      if(score<bs){bs=score;best=c}
+    }
+    if(!best)break;chosen.push(best);out.push(best);
+  }
   return out;
 }
 function suggestPackages(n){
@@ -2094,7 +2172,7 @@ function suggestPackages(n){
   if(!cat.pv.length||!cat.inv.length){PKGS=[{label:"Standard",cfg:{...base,panel:"auto",inverter:"auto",battery:"auto",batQty:""},sel:true}];saveCalc();toast("Add panels and inverters with prices in Suppliers to get package suggestions");return}
   const chosen=pickLadder(allCandidates(ref,cat,base),n);
   PKGS=chosen.map(c=>({label:"",cfg:c.cfg,sel:true}));sortPkgs();C.act=0;saveCalc();
-  if(chosen.length<n)toast(`Only ${chosen.length} clearly different packages are possible with your Suppliers list. Smaller inverters (3–5 kW) or more battery sizes give more options.`);
+  if(chosen.length<n)toast(`${chosen.length} different packages fit this client with your Suppliers list`);
 }
 function runInfo(p){const r=pkgRun(p);return {key:pkgKey(r),price:r.contract,kwp:r.kwp,pb:bName(r.pv),ib:bName(r.inv),bb:bName(r.bat),inv:r.inv?r.inv.id:"",bat:r.bat?r.bat.id:""}}
 /* keep packages ordered by selling price, highest first, and name them by rank unless you renamed them */
