@@ -1217,10 +1217,10 @@ html.modal-open .app{pointer-events:none}
 .pring{width:92px;height:92px;border-radius:50%;background:conic-gradient(var(--c) calc(var(--p)*1%),var(--line) 0);display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative}
 .pring::before{content:"";position:absolute;inset:9px;border-radius:50%;background:var(--soft)}
 .pring b,.pring span{position:relative}.pring b{font-size:20px}.pring span{font-size:10.5px;color:var(--muted)}
-.pnums,.pkv,.plog{display:flex;flex-direction:column;gap:4px;min-width:0}
-.pnums div,.pkv div,.plog div{display:flex;justify-content:space-between;gap:10px;font-size:13px;min-width:0}
-.pnums span,.pkv span,.plog span{color:var(--muted);flex:none}
-.pnums b,.pkv b,.plog b{text-align:right;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pnums,.pjkv,.plog{display:flex;flex-direction:column;gap:4px;min-width:0}
+.pnums div,.pjkv div,.plog div{display:flex;justify-content:space-between;gap:10px;font-size:13px;min-width:0}
+.pnums span,.pjkv span,.plog span{color:var(--muted);flex:none}
+.pnums b,.pjkv b,.plog b{text-align:right;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pnums .y b{color:var(--sol)}.pnums .g b{color:var(--good)}.pnums .int{border-top:1px dashed var(--line);padding-top:4px}
 .plog{border-left:1px solid var(--line);padding-left:14px}
 .pdates{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
