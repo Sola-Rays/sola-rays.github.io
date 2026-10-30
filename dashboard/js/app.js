@@ -109,7 +109,12 @@ function errMsg(e){
   if(c==="bad_sheet")return "Your Apps Script is an older version that doesn't know the Calendar tab. Paste the new Code.gs and deploy a new version.";
   return (e&&e.message)||"Something went wrong talking to Google Sheets. Tap Try again.";
 }
-async function api(body){
+/* At most 2 requests to the Apps Script at a time; the rest wait their turn (keeps us far below Google's execution limits) */
+let apiBusy=0;const apiWait=[];
+const apiSlot=()=>apiBusy<2?(apiBusy++,Promise.resolve()):new Promise(r=>apiWait.push(r));
+const apiDone=()=>{const n=apiWait.shift();if(n)n();else apiBusy--};
+async function api(body){await apiSlot();try{return await apiCall(body)}finally{apiDone()}}
+async function apiCall(body){
   if(!cfg.api||!cfg.key)throw {code:"setup"};
   if(navigator.onLine===false)throw {code:"offline"};
   let res;
@@ -1450,6 +1455,9 @@ function photoURL(id){
 /* Small previews: asked for in batches, kept in memory and saved on this device, so lists and forms open fast.
    The full-size file is only downloaded when it is opened. */
 const TKEY="sr.thumb.";
+/* a file whose preview failed is not asked for again for 24 hours */
+const thumbBad=id=>lsSet("sr.thumbx."+id,String(Date.now()));
+const thumbFailedRecently=id=>{const t=+lsGet("sr.thumbx."+id)||0;return t&&Date.now()-t<864e5};
 const thumbPending=new Map();let thumbTimer=null;
 const thumbLocal=id=>{try{const v=localStorage.getItem(TKEY+id);return v?JSON.parse(v):null}catch(e){return null}};
 function thumbSave(id,info){
@@ -1462,21 +1470,23 @@ function seedThumb(id,info){thumbCache[id]=Promise.resolve(info);thumbSave(id,in
 function flushThumbs(){
   thumbTimer=null;
   const batch=[...thumbPending.entries()].slice(0,12);batch.forEach(([id])=>thumbPending.delete(id));
-  if(thumbPending.size)thumbTimer=setTimeout(flushThumbs,0);
   if(!batch.length)return;
+  thumbTimer=-1; /* the next batch is sent only after this one answers */
+  const next=()=>{thumbTimer=null;if(thumbPending.size)thumbTimer=setTimeout(flushThumbs,50)};
   api({action:"thumbs",ids:batch.map(b=>b[0])}).then(j=>{
     const byId={};(j.items||[]).forEach(it=>{if(it&&it.id)byId[it.id]=it});
     batch.forEach(([id,cb])=>{const it=byId[id];
-      if(!it||it.ok===false){cb.rej({code:"thumb_failed"});return}
+      if(!it||it.ok===false){thumbBad(id);cb.rej({code:"thumb_failed"});return}
       const info={mime:it.mime,name:it.name,size:it.size,url:it.data?`data:${it.thumbMime||"image/jpeg"};base64,${it.data}`:null};
       thumbSave(id,info);cb.res(info)});
-  }).catch(e=>batch.forEach(([,cb])=>cb.rej(e)));
+  }).catch(e=>batch.forEach(([,cb])=>cb.rej(e))).finally(next);
 }
 function thumbInfo(id){
   if(String(id).startsWith("local-"))return localThumb(id);
   if(thumbCache[id])return thumbCache[id];
   const saved=thumbLocal(id);
   if(saved){thumbCache[id]=Promise.resolve(saved);return thumbCache[id]}
+  if(thumbFailedRecently(id)){thumbCache[id]=Promise.reject({code:"thumb_failed"});thumbCache[id].catch(()=>{});return thumbCache[id]}
   const p=new Promise((res,rej)=>{thumbPending.set(id,{res,rej});if(!thumbTimer)thumbTimer=setTimeout(flushThumbs,30)});
   thumbCache[id]=p;p.catch(()=>{delete thumbCache[id]});return p;
 }
