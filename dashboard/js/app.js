@@ -50,7 +50,7 @@ const TABS={
   ["ID","ID","hidden"],["Client No.","Client No.","hidden"],["Client","Client","clientpick"],["System (kWp)","System (kWp)","number"],["Panels","Panels","text"],
   ["Inverter","Inverter","text"],["Battery","Battery","text"],["Contract Price","Contract price (₱)","number"],["Job Cost","Job cost (₱) · internal","number"],["Contract Date","Contract date","date"],
   ["Payment","Payment","select",["Cash","GSIS loan"]],["Amount Received","Amount received (₱)","paid"],["Payments","Payments","hidden"],
-  ["Status","Status","select",["Downpayment","Ordering","Scheduled","Installing","Awaiting loan release","Completed"]],
+  ["Status","Status","select",["Inquiry","Quotation","Consultation","Payment","Schedule","Installation","Complete"]],
   ["Start Date","Start date","date"],["Completion Date","Completion date","date"],["Notes","Notes","textarea"],["Photos","Photos","photos"]]},
  Suppliers:{sheet:"Suppliers",key:"suppliers",title:"Supplier item",idField:null,filterField:"Item",filterOpts:["PV Module","Inverter","Battery","Accessories"],fields:[
   ["Supplier","Supplier","text"],["Item","Category","select",["PV Module","Inverter","Battery","Accessories"]],
@@ -255,7 +255,7 @@ function saveSetting(key,value){
 
 /* ---------- status pills ---------- */
 const PILL={Lead:"",Accepted:"good",Signed:"good",Consulted:"info",Yes:"good",No:"",Scheduled:"info",Done:"",Quoted:"warn",Won:"good",Lost:"bad",
-  Downpayment:"warn",Ordering:"info",Installing:"warn",Completed:"good","Awaiting loan release":"info"};
+  Inquiry:"",Quotation:"info",Consultation:"info",Payment:"warn",Schedule:"info",Installation:"warn",Complete:"good"};
 const pill=s=>s?`<span class="pill ${PILL[s]||""}">${esc(s)}</span>`:"";
 
 /* ---------- render ---------- */
@@ -270,7 +270,7 @@ function banner(){
   return `<div class="banner" role="alert"><span>${esc(errMsg(e))}${note}</span>${act}</div>`;
 }
 function render(){
-  renderNav();
+  normStages();renderNav();
   const m=$("#main");
   if(!cfg.api||!cfg.key)state.view="settings";
   document.body.dataset.screen=state.view;
@@ -355,7 +355,7 @@ function allEvents(){
     ev.push({iso,start:parseTime(e["Start Time"]),end:parseTime(e["End Time"]),type:e.Type||"Other",title:e.Title||((e.Type||"Event")+(e.Client?": "+e.Client:"")),client:e.Client||"",clientRef:c,loc:e.Location||(c&&c.Address)||"",status:e.Status||"Scheduled",src:"Calendar",row:e._row})});
   const has=(iso,type,c)=>ev.some(x=>x.src==="Calendar"&&x.iso===iso&&x.type===type&&c&&x.clientRef===c);
   state.data.Projects.forEach(p=>{const iso=toISO(p["Start Date"]);if(!iso)return;const c=clientFor(p);if(has(iso,"Installation",c))return;
-    ev.push({iso,start:"",end:"",type:"Installation",title:"Installation: "+(p.Client||"Project"),client:p.Client||"",clientRef:c,loc:(c&&c.Address)||"",status:p.Status==="Completed"?"Done":"Scheduled",src:"Projects",row:p._row,auto:true})});
+    ev.push({iso,start:"",end:"",type:"Installation",title:"Installation: "+(p.Client||"Project"),client:p.Client||"",clientRef:c,loc:(c&&c.Address)||"",status:p.Status==="Complete"?"Done":"Scheduled",src:"Projects",row:p._row,auto:true})});
   state.data.Clients.forEach(c=>{const iso=toISO(c["Consultation Date"]);if(!iso)return;if(has(iso,"Site visit / Consultation",c))return;
     ev.push({iso,start:"",end:"",type:"Site visit / Consultation",title:"Consultation: "+(c.Client||"Client"),client:c.Client||"",clientRef:c,loc:c.Address||"",status:c["Consulted (Y/N)"]==="Yes"?"Done":"Scheduled",src:"Clients",row:c._row,auto:true})});
   return ev.sort((a,b)=>a.iso.localeCompare(b.iso)||(a.start||"99").localeCompare(b.start||"99"));
@@ -563,12 +563,12 @@ function dashCalc(){
   const signed=series(B,Projects,pDate,p=>num(p["Contract Price"]));
   const payItems=Projects.flatMap(p=>{const logs=paymentLines(p);const logged=logs.reduce((a,x)=>a+x.amt,0);const rest=num(p["Amount Received"])-logged;return [...logs.map(x=>({iso:x.iso,amt:x.amt})),...(rest>0?[{iso:pDate(p),amt:rest}]:[])]});
   const collected=series(B,payItems,x=>x.iso,x=>x.amt);
-  const done=Projects.filter(p=>p.Status==="Completed");
+  const done=Projects.filter(p=>p.Status==="Complete");
   const kwpSeries=series(B,done,cDate,p=>num(p["System (kWp)"]));
   const kwpCum=cumulate(kwpSeries);
   const visits=series(B,Clients.filter(c=>c["Consulted (Y/N)"]==="Yes"),vDate,()=>1);
   const started=series(B,Projects,pDate,()=>1);
-  const active=Projects.filter(p=>p.Status!=="Completed");
+  const active=Projects.filter(p=>p.Status!=="Complete");
   const pipeline=active.reduce((s,p)=>s+num(p["Contract Price"]),0);
   const collect=active.reduce((s,p)=>s+balanceOf(p),0);
   const projIn=Projects.filter(p=>inR(pDate(p)));
@@ -588,7 +588,8 @@ function dashCalc(){
   const signedIn=quotedIn.filter(c=>st(c)==="Signed");
   const pending=Clients.filter(c=>st(c)==="Quoted"||st(c)==="Accepted");
   const pendingVal=pending.reduce((s,c)=>s+quoteValue(c),0);
-  const gsisWait=Projects.filter(p=>p.Status==="Awaiting loan release");
+  /* GSIS: installed, loan not yet released (balance still open) */
+  const gsisWait=Projects.filter(p=>p.Payment==="GSIS loan"&&balanceOf(p)>0&&(p.Status==="Installation"||p.Status==="Complete"));
   const gsisWaitBal=gsisWait.reduce((s,p)=>s+balanceOf(p),0);
   const withCost=projIn.filter(p=>num(p["Job Cost"])>0);
   const gp=withCost.reduce((s,p)=>s+num(p["Contract Price"])-num(p["Job Cost"]),0);
@@ -647,7 +648,7 @@ function kpiDefs(D){
     active:{label:"Active projects",n:D.active.length,fmt:"int",hint:`${shortPeso(D.pipeline)} contract value`,vals:D.started,color:COL.sol,go:"projects:Active"},
     kwp:{label:"kWp installed",n:D.kwpIn,fmt:"kwp",hint:`${D.doneIn.length} system${D.doneIn.length===1?"":"s"} completed`,vals:D.kwpCum,color:COL.lav,go:"projects:Completed"},
     installDays:{label:"Install days per job",n:iD,fmt:"days",hint:iD==null?"Needs start and completion dates":iD<=10?"Within your 5–10 day promise":"Over your 5–10 day promise",hc:iD==null?"":iD<=10?COL.green:COL.coral,vals:D.inst.length>1?D.inst:[0,0],color:COL.teal||"#3DD6C6",go:"projects:Completed"},
-    gsisWait:{label:"Waiting on GSIS release",n:D.gsisWait.length,fmt:"int",hint:D.gsisWait.length?shortPeso(D.gsisWaitBal)+" to be released":"Nothing waiting",vcls:D.gsisWait.length?"y":"",vals:D.started,color:"#3DD6C6",go:"projects:Awaiting loan release"},
+    gsisWait:{label:"Waiting on GSIS release",n:D.gsisWait.length,fmt:"int",hint:D.gsisWait.length?shortPeso(D.gsisWaitBal)+" to be released":"Nothing waiting",vcls:D.gsisWait.length?"y":"",vals:D.started,color:"#3DD6C6",go:"projects:Balance"},
     jobsWeek:{label:"Jobs this week",n:D.week.length,fmt:"int",hint:`${D.week.filter(e=>e.type==="Installation").length} installs · ${D.week.filter(e=>e.type==="Site visit / Consultation").length} site visits`,vals:D.weekDays,color:COL.blue,go:"calendar"},
     topSource:{label:"Top lead source",text:top?top[0]:null,hint:top?`${top[1].n} of ${D.tagged} tagged clients · ${top[1].signed} signed`:"Add a lead source to your clients",vals:D.srcList.map(x=>x[1].n).reverse(),color:COL.green,go:"clients"}
   };
@@ -740,10 +741,10 @@ function panelBody(id,D){
   if(id==="contracts")return {sub:D.perLabel[0].toUpperCase()+D.perLabel.slice(1)+" · ₱",go:"projects:All",body:legendHTML([[COL.sol,"Contracts signed"],[COL.blue,"Collected"]])+chartSlot(barLine({labels:D.B.labels,bars:D.signed,line:D.collected,barColor:COL.sol,lineColor:COL.blue,fmt:shortPeso,emptyText:"Add projects with a contract date to see this chart"}),"Contracts signed and amounts collected, "+D.perLabel)};
   if(id==="kwpChart")return {sub:"Completed systems",go:"projects:Completed",body:legendHTML([[COL.lav,"kWp per period"],[COL.sol,"Running total"]])+chartSlot(barLine({labels:D.B.labels,bars:D.kwpSeries,line:D.kwpCum,barColor:COL.lav,lineColor:COL.sol,fmt:v=>String(Math.round(v*10)/10),lineFmt:v=>(Math.round(v*10)/10)+" kWp",lineOwnScale:true,emptyText:"Completed projects show here"}),"kWp installed per period with running total")};
   if(id==="pipeline"){
-    const stages=[["Downpayment",COL.coral],["Ordering",COL.lav],["Scheduled",COL.blue],["Installing",COL.sol],["Awaiting loan release","#3DD6C6"]].map(([n,c])=>[n,D.active.filter(p=>p.Status===n).length,c]);
+    const stages=PROJECT_STAGES.filter(s=>s!=="Complete").map(n=>[n,D.active.filter(p=>p.Status===n).length,STAGE_COLOR[n]]);
     const next=D.evs.find(e=>e.type==="Installation"&&e.iso>=t&&e.status==="Scheduled");
     return {sub:`${D.active.length} active`,go:"projects:Active",body:`<div class="cbody pipe2"><div class="stackbar">${D.active.length?stages.filter(s=>s[1]).map(([n,v,c])=>`<i style="flex:${v};background:${c}" title="${n}: ${v}"></i>`).join(""):'<i style="flex:1;background:#32465E"></i>'}</div>
-      <div class="slist">${stages.map(([n,v,c])=>`<button type="button" class="lg lgb" data-goto="projects:${esc(n)}"><i style="background:${c}"></i><span>${n==="Awaiting loan release"?"Loan release":n}</span><b>${v}</b></button>`).join("")}</div>
+      <div class="slist">${stages.map(([n,v,c])=>`<button type="button" class="lg lgb" data-goto="projects:${esc(n)}"><i style="background:${c}"></i><span>${n}</span><b>${v}</b></button>`).join("")}</div>
       <button type="button" class="nextbox" ${next?`data-edit="${next.src}" data-row="${next.row}"`:'data-view="calendar"'}><span>Next install</span><b>${next?esc(next.client||next.title)+" · "+fmtDate(next.iso).replace(/, \d{4}$/,""):"None scheduled"}</b></button></div>`};
   }
   if(id==="funnel"){
@@ -781,7 +782,7 @@ function panelBody(id,D){
   }
   if(id==="gsisList"){
     const list=[...D.gsisWait].sort((a,b)=>(D.pDate(a)||"9").localeCompare(D.pDate(b)||"9"));
-    return {sub:`${list.length} · ${shortPeso(D.gsisWaitBal)}`,go:"projects:Awaiting loan release",body:`<div class="cbody plist">${list.length?list.map(p=>{const c=clientFor(p);return `<button type="button" class="prow" data-edit="Projects" data-row="${p._row}"><span class="m"><b>${esc((c&&c.Client)||p.Client||"Project")}</b><span>${esc([p["System (kWp)"]?p["System (kWp)"]+" kWp":"",D.pDate(p)?"Signed "+relDays(D.pDate(p)):""].filter(Boolean).join(" · "))}</span></span><span class="r"><b class="y">${shortPeso(balanceOf(p))}</b><span class="sub">to release</span></span></button>`}).join(""):`<div class="empty">No projects waiting for a GSIS loan release.</div>`}</div>`};
+    return {sub:`${list.length} · ${shortPeso(D.gsisWaitBal)}`,go:"projects:Balance",body:`<div class="cbody plist">${list.length?list.map(p=>{const c=clientFor(p);return `<button type="button" class="prow" data-edit="Projects" data-row="${p._row}"><span class="m"><b>${esc((c&&c.Client)||p.Client||"Project")}</b><span>${esc([p["System (kWp)"]?p["System (kWp)"]+" kWp":"",D.pDate(p)?"Signed "+relDays(D.pDate(p)):""].filter(Boolean).join(" · "))}</span></span><span class="r"><b class="y">${shortPeso(balanceOf(p))}</b><span class="sub">to release</span></span></button>`}).join(""):`<div class="empty">No projects waiting for a GSIS loan release.</div>`}</div>`};
   }
   if(id==="balances"){
     const list=D.active.filter(p=>balanceOf(p)>0).sort((a,b)=>balanceOf(b)-balanceOf(a)).slice(0,8);
@@ -888,9 +889,12 @@ const endDrag=()=>{
   if(!drag)return;const d=drag;drag=null;d.ghost.remove();d.el.classList.remove("dragging");if(d.target)moveBefore(d.kind,d.id,d.target,d.after);else render()};
 document.addEventListener("pointerup",endDrag);document.addEventListener("pointercancel",endDrag);
 
-const PROJECT_STAGES=["Downpayment","Ordering","Scheduled","Installing","Awaiting loan release","Completed"];
-const STAGE_COLOR={"Downpayment":"#FF7A59","Ordering":"#B9A6FF","Scheduled":"#6CB4FF","Installing":"#FFB612","Awaiting loan release":"#3DD6C6","Completed":"#4FD18B"};
-const shortStage=s=>s==="Awaiting loan release"?"Loan release":s;
+const PROJECT_STAGES=["Inquiry","Quotation","Consultation","Payment","Schedule","Installation","Complete"];
+/* older sheet values still show in the right place */
+const OLD_STAGE={Downpayment:"Payment",Ordering:"Payment",Scheduled:"Schedule",Installing:"Installation","Awaiting loan release":"Installation",Completed:"Complete"};
+function normStages(){(state.data.Projects||[]).forEach(p=>{const s=String(p.Status||"").trim();if(OLD_STAGE[s])p.Status=OLD_STAGE[s]})}
+const STAGE_COLOR={"Inquiry":"#8FB3D9","Quotation":"#B9A6FF","Consultation":"#3DD6C6","Payment":"#FF7A59","Schedule":"#6CB4FF","Installation":"#FFB612","Complete":"#4FD18B"};
+const shortStage=s=>s;
 const balanceOf=p=>Math.max(0,num(p["Contract Price"])-num(p["Amount Received"]));
 const paidPct=p=>{const c=num(p["Contract Price"]);return c?Math.min(100,Math.round(num(p["Amount Received"])/c*100)):0};
 
@@ -968,7 +972,7 @@ function projectPrefill(c){
   const pks=parsePackages(c.Packages),ch=pks.find(p=>p.name===c["Chosen Package"])||(pks.length===1?pks[0]:null);
   const costs=parsePackages(c["Package Costs"]);const cost=ch&&costs.find(p=>p.name===ch.name);
   const notes=[ch?`Package: ${ch.name}`:"",c.kWh?`Client uses ${num(c.kWh)} kWh/month`+(c.Amount?`, bill ${peso(c.Amount)}`:""):""].filter(Boolean).join(". ");
-  return {Client:c.Client,"Client No.":c["S.N."],"Contract Price":ch&&ch.price?ch.price:"","Job Cost":cost&&cost.price?cost.price:"",Notes:notes};
+  return {Status:"Payment",Client:c.Client,"Client No.":c["S.N."],"Contract Price":ch&&ch.price?ch.price:"","Job Cost":cost&&cost.price?cost.price:"",Notes:notes};
 }
 function clientDetail(c){
   const st=stageOf(c),pj=projectsFor(c);
@@ -1024,11 +1028,11 @@ function clientsView(){
 
 function projectsView(){
   const all=state.data.Projects,f=state.filter.projects,q=state.q.projects.toLowerCase();
-  const active=all.filter(p=>p.Status!=="Completed"),done=all.filter(p=>p.Status==="Completed");
+  const active=all.filter(p=>p.Status!=="Complete"),done=all.filter(p=>p.Status==="Complete");
   const contract=all.reduce((s,p)=>s+num(p["Contract Price"]),0),recv=all.reduce((s,p)=>s+num(p["Amount Received"]),0);
   const collect=all.reduce((s,p)=>s+balanceOf(p),0),kwp=done.reduce((s,p)=>s+num(p["System (kWp)"]),0);
   const rate=contract?Math.round(recv/contract*100):null;
-  const match=p=>f==="All"||(f==="Active"&&p.Status!=="Completed")||(f==="Balance"&&balanceOf(p)>0)||p.Status===f;
+  const match=p=>f==="All"||(f==="Active"&&p.Status!=="Complete")||(f==="Balance"&&balanceOf(p)>0)||p.Status===f;
   const rows=all.filter(p=>match(p)&&(!q||Object.values(p).join(" ").toLowerCase().includes(q)));
   const stat=(l,v,s,flt,cls="")=>`<button type="button" class="pstat ${f===flt&&flt!=="All"?"on":""}" data-filter="projects" data-val="${flt}"><span class="l">${l}</span><b class="${cls}">${v}</b><span class="s">${s}</span></button>`;
   const board=state.pview==="board";
@@ -1038,17 +1042,17 @@ function projectsView(){
     :null;
   /* list + details side by side on laptop and iPad; on a phone the list opens the project form */
   const split=!board&&innerWidth>=900;
-  const order=p=>(p.Status==="Completed"?1:0);
+  const order=p=>(p.Status==="Complete"?1:0);
   rows.sort((a,b)=>order(a)-order(b)||String(toISO(b["Contract Date"])||"").localeCompare(String(toISO(a["Contract Date"])||""))||b._row-a._row);
   let sel=split?(all.find(p=>p._row===state.psel)||rows[0]||null):null;
   const listHTML=`<div class="list plist2">${rows.length?rows.map(p=>projCard(p,split,sel===p)).join(""):`<div class="empty">${all.length?"No projects match this filter.":"No projects yet. Open a client and tap Signed? Project when they sign."}</div>`}</div>`;
-  return `<div class="vw v-projects">`+header("Projects",`${all.length} project${all.length===1?"":"s"} · From downpayment to switch-on`,
+  return `<div class="vw v-projects">`+header("Projects",`${all.length} project${all.length===1?"":"s"} · From inquiry to switch-on`,
     `<div class="seg" role="group" aria-label="View"><button type="button" class="btn${!board?" on":""}" data-pview="list" aria-pressed="${!board}">List</button><button type="button" class="btn${board?" on":""}" data-pview="board" aria-pressed="${board}">Board</button></div><button class="btn btn-sol" type="button" data-new="Projects">${UI.plus}<span class="lbl">Add project</span></button>`)+
   `<div class="pstats hscroll">
      ${stat("Active jobs",active.length,shortPeso(active.reduce((s,p)=>s+num(p["Contract Price"]),0))+" contract value","Active")}
      ${stat("Received",shortPeso(recv),"Payments logged","All","g")}
      ${stat("To collect",shortPeso(collect),all.filter(p=>balanceOf(p)>0).length+" with balance","Balance","y")}
-     ${stat("kWp installed",(Math.round(kwp*10)/10).toLocaleString("en-PH"),done.length+" completed","Completed")}
+     ${stat("kWp installed",(Math.round(kwp*10)/10).toLocaleString("en-PH"),done.length+" completed","Complete")}
      ${stat("Collection rate",rate==null?"–":rate+"%","Received vs contract","Balance",rate!=null&&rate>=80?"g":"")}
    </div>
    ${pipe}
@@ -1233,7 +1237,7 @@ function projCard(p,split,on){
   const name=(cl&&cl.Client)||p.Client||"No client";
   const sys=[p["System (kWp)"]?p["System (kWp)"]+" kWp":"",p.Inverter,p.Battery].filter(Boolean).join(" · ");
   const st=toISO(p["Start Date"]),t=today();
-  const when=p.Status==="Completed"?(toISO(p["Completion Date"])?"Done "+fmtDate(p["Completion Date"]).replace(/, \d{4}$/,""):"Completed"):st?(st>=t?`Install ${st===t?"today":"in "+daysBetween(t,st)+" d"}`:(p.Status==="Installing"||p.Status==="Awaiting loan release"?"Installed from ":"Install date was ")+fmtDate(st).replace(/, \d{4}$/,"")):"No install date";
+  const when=p.Status==="Complete"?(toISO(p["Completion Date"])?"Done "+fmtDate(p["Completion Date"]).replace(/, \d{4}$/,""):"Completed"):st?(st>=t?`Install ${st===t?"today":"in "+daysBetween(t,st)+" d"}`:(p.Status==="Installation"?"Installing since ":"Install date was ")+fmtDate(st).replace(/, \d{4}$/,"")):"No install date";
   const attr=split?`data-pick-proj="${p._row}"`:`data-edit="Projects" data-row="${p._row}"`;
   return `<button type="button" class="pcard${on?" on":""}" ${attr} style="--c:${col}">
     <span class="avatar" style="background:${col}">${esc(initials(name))}</span>
@@ -1243,8 +1247,8 @@ function projCard(p,split,on){
 function projDetail(p){
   const cl=clientFor(p),col=STAGE_COLOR[p.Status]||"#5E7590",name=(cl&&cl.Client)||p.Client||"No client";
   const c=num(p["Contract Price"]),rcv=num(p["Amount Received"]),bal=balanceOf(p),pct=paidPct(p),cost=num(p["Job Cost"]);
-  const idx=PROJECT_STAGES.indexOf(p.Status),next=PROJECT_STAGES[idx+1]&&!(p.Payment!=="GSIS loan"&&PROJECT_STAGES[idx+1]==="Awaiting loan release")?PROJECT_STAGES[idx+1]:PROJECT_STAGES[idx+2];
-  const stages=PROJECT_STAGES.filter(s=>s!=="Awaiting loan release"||p.Payment==="GSIS loan"||p.Status===s);
+  const idx=PROJECT_STAGES.indexOf(p.Status),next=PROJECT_STAGES[idx+1];
+  const stages=PROJECT_STAGES;
   const ci=stages.indexOf(p.Status);
   const stepper=`<div class="pstepper">${stages.map((s,i)=>`<div class="ps ${i<ci?"done":i===ci?"cur":""}" style="--c:${STAGE_COLOR[s]}"><i>${i<ci?"✓":i+1}</i><span>${esc(shortStage(s))}</span></div>`).join("")}</div>`;
   const pays=paymentLines(p);
@@ -1256,7 +1260,7 @@ function projDetail(p){
   return `<div class="pdh"><span class="avatar lg" style="background:${col}">${esc(initials(name))}</span><div class="pdn"><h2>${esc(name)}</h2><span>${esc([cl?townOf(cl):"",p.Payment,p.ID].filter(Boolean).join(" · "))}</span></div>
       <div class="pdacts">${tel?`<a class="btn btn-line btn-sm" href="tel:${esc(tel)}">${UI.phone}<span class="lbl">Call</span></a>`:""}${cl?`<button type="button" class="btn btn-line btn-sm" data-client="${cl._row}">${ico("clients")}<span class="lbl">Client</span></button>`:""}<button type="button" class="btn btn-sol btn-sm" data-edit="Projects" data-row="${p._row}">${UI.edit}<span class="lbl">Edit</span></button></div></div>
     ${stepper}
-    ${next&&p.Status!=="Completed"?`<button type="button" class="btn btn-line pnext" data-proj-next="${p._row}" data-to="${esc(next)}" style="--c:${STAGE_COLOR[next]}"><i></i>Move to ${esc(shortStage(next))}</button>`:""}
+    ${next&&p.Status!=="Complete"?`<button type="button" class="btn btn-line pnext" data-proj-next="${p._row}" data-to="${esc(next)}" style="--c:${STAGE_COLOR[next]}"><i></i>Move to ${esc(shortStage(next))}</button>`:""}
     <div class="pdgrid2">
       <section class="pbox pmoney"><h3>Payments</h3>
         <div class="pring" style="--p:${pct};--c:${pct>=100?"var(--good)":"var(--sol)"}"><b>${pct}%</b><span>paid</span></div>
@@ -1438,7 +1442,7 @@ function openForm(name,rec,prefill){
     if(t.idMode==="serial")r[t.idField]=Math.max(0,...state.data[name].map(x=>num(x[t.idField])))+1;
     if(t.idMode==="prefix")r[t.idField]=t.prefix+"-"+Date.now().toString(36).toUpperCase();
     if(name==="Clients"){r["Consulted (Y/N)"]=r["Consulted (Y/N)"]||"No";r.Quotation=r.Quotation||"Not sent"}
-    if(name==="Projects"){r.Status=r.Status||"Downpayment";r["Contract Date"]=r["Contract Date"]||today()}
+    if(name==="Projects"){r.Status=r.Status||"Inquiry";r["Contract Date"]=r["Contract Date"]||today()}
     if(name==="Calendar"){r.Status=r.Status||"Scheduled";r.Date=r.Date||state.cal.sel||today();r.Type=r.Type||"Site visit / Consultation";r.Created=sheetDate(today())}
   }
   const ph={ids:photoIds(r.Photos),added:[],removed:[],busy:0};
@@ -2753,7 +2757,7 @@ document.addEventListener("click",async e=>{
   const pc=T.closest("[data-pick-client]");if(pc){state.sel=+pc.dataset.pickClient;state.detail=true;render();const d=$(".cdetail");if(d)d.scrollTop=0;return}
   const pp=T.closest("[data-pick-proj]");if(pp){state.psel=+pp.dataset.pickProj;render();const d=$(".pdet");if(d)d.scrollTop=0;return}
   const pn=T.closest("[data-proj-next]");if(pn){const p=state.data.Projects.find(x=>x._row==pn.dataset.projNext);if(p){const to=pn.dataset.to,rec={...p,Status:to};
-    if(to==="Installing"&&!toISO(p["Start Date"]))rec["Start Date"]=today();if(to==="Completed"&&!toISO(p["Completion Date"]))rec["Completion Date"]=today();
+    if(to==="Installation"&&!toISO(p["Start Date"]))rec["Start Date"]=today();if(to==="Complete"&&!toISO(p["Completion Date"]))rec["Completion Date"]=today();
     if(await saveRecord("Projects",rec,false,p))toast(`${p.Client||"Project"} moved to ${shortStage(to)}`)}return}
   const pe=T.closest("[data-proj-ev]");if(pe){const p=state.data.Projects.find(x=>x._row==pe.dataset.projEv);const cl=p&&clientFor(p);openForm("Calendar",null,{Client:p?p.Client:"","Client No.":p?p["Client No."]:"",Project:p?p.ID:"",Location:cl?cl.Address||"":"",Date:today()});return}
   const oc=T.closest("[data-client]");if(oc){openClient(+oc.dataset.client);return}

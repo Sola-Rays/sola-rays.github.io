@@ -343,7 +343,7 @@ svg.anim .pt{transform-box:fill-box;transform-origin:center;animation:pop .3s ea
 .pstat b.y{color:var(--sol)}.pstat b.g{color:var(--good)}
 .pstat .s{font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pstat.on,.pstat:hover{border-color:var(--sol)}
-.pipeline{display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:4px;flex:none}
+.pipeline{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;flex:none}
 .pstep{position:relative;display:flex;align-items:center;gap:8px;background:var(--navy);border:1px solid var(--line);padding:9px 12px;min-width:0;font-size:12px;font-weight:600;color:#C9D3DF;text-align:left;border-radius:10px;flex:none}
 .pstep i{width:10px;height:10px;border-radius:50%;background:var(--c);flex:none}
 .pstep span{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -1276,3 +1276,6 @@ html.modal-open .app{pointer-events:none}
 .evrow.now{animation:todayPulse 2.6s ease-in-out infinite}
 @media (prefers-reduced-motion:reduce){.wkcol.today{animation:none;box-shadow:inset 0 0 0 2px var(--sol)}.day.today,.day.today .dn,.wkd.today,.lday.today .ldate{animation:none;background:color-mix(in srgb,var(--sol) 18%,var(--soft))}}
 @media (max-width:699px){.v-cal .vhead .acts{gap:5px}.v-cal .vhead .seg .btn{padding:5px 7px;font-size:12.5px}.v-cal .mnav{gap:3px}.v-cal .mnav .iconbtn{width:34px;height:34px;min-width:34px}.v-cal .mnav b{font-size:12.5px;max-width:92px;overflow:hidden;text-overflow:ellipsis}.v-cal .vhead [data-new]{padding-left:10px;padding-right:10px;flex:none}}
+@container (min-width:280px){.pipe2 .slist{grid-template-columns:repeat(3,minmax(0,1fr));gap:2px 10px}.pipe2 .lgb{font-size:12px}}
+@media (max-width:380px){.v-cal .vhead [data-new] .lbl{display:none}}
+@media (max-width:380px){.v-cal .vhead .seg .btn{padding:5px 5px;font-size:12px}.v-cal .mnav b{max-width:66px;font-size:12px}.v-cal .mnav .iconbtn{width:30px;height:30px;min-width:30px}.v-cal .vhead .acts{gap:4px}}
