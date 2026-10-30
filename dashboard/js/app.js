@@ -92,7 +92,7 @@ const qs=n=>`'${n.replace(/'/g,"''")}'`;
 const lsGet=k=>{try{return localStorage.getItem(k)}catch(e){return null}};
 const lsSet=(k,v)=>{try{localStorage.setItem(k,v)}catch(e){}};
 
-function setSync(s,text){const d=$("#dot");d.className="dot "+(s==="ok"?"ok":s==="busy"?"busy":s==="err"?"err":"");$("#syncText").textContent=text}
+function setSync(s,text){const d=$("#dot");if(!d)return;d.className="dot "+(s==="ok"?"ok":s==="busy"?"busy":s==="err"?"err":s==="wait"?"wait":"");d.title=text;$("#syncText").textContent=text}
 function toast(t){const el=document.createElement("div");el.className="toast";el.textContent=t;document.body.appendChild(el);setTimeout(()=>el.remove(),2200)}
 
 /* ---------- Google Sheets via the SolaRays Apps Script ---------- */
@@ -124,10 +124,10 @@ const IDB=(()=>{
   let dbp=null;
   const open=()=>dbp||(dbp=new Promise((res,rej)=>{try{const r=indexedDB.open("solarays-v2",1);r.onupgradeneeded=()=>r.result.createObjectStore("kv");r.onsuccess=()=>res(r.result);r.onerror=()=>rej(r.error)}catch(e){rej(e)}}));
   const run=(mode,fn)=>open().then(db=>new Promise((res,rej)=>{const t=db.transaction("kv",mode);const q=fn(t.objectStore("kv"));t.oncomplete=()=>res(q&&q.result);t.onerror=()=>rej(t.error);t.onabort=()=>rej(t.error)}));
-  return {get:k=>run("readonly",s=>s.get(k)).catch(()=>null),set:(k,v)=>run("readwrite",s=>s.put(v,k)).catch(()=>{})};
+  return {get:k=>run("readonly",s=>s.get(k)).catch(()=>null),set:(k,v)=>run("readwrite",s=>s.put(v,k)).catch(()=>{}),del:k=>run("readwrite",s=>s.delete(k)).catch(()=>{})};
 })();
 let cacheT=0;
-const stripPending=list=>list.map(o=>{const c={...o};delete c._pending;return c});
+const stripPending=list=>list.map(o=>({...o}));
 function saveCache(){clearTimeout(cacheT);cacheT=setTimeout(()=>{const d={};Object.keys(state.data).forEach(k=>d[k]=stripPending(state.data[k]));IDB.set("data",{data:d,heads:state.heads,at:Date.now()})},400)}
 async function loadCache(){
   const c=await IDB.get("data");
@@ -153,6 +153,7 @@ function loadAll(opts={}){
     if(!opts.silent)setSync("busy",state.cached?"Updating…":"Syncing…");
     try{
       if(pendingWrites)await writeQ;
+      if(OB.ops.length)await obRun();
       const tabs={};Object.values(TABS).forEach(t=>tabs[t.sheet]=t.fields.map(f=>f[0]));
       const j=await api({action:"read",tabs});
       if(pendingWrites&&opts.silent)return; /* a save started meanwhile: keep what is on screen */
@@ -167,12 +168,15 @@ function loadAll(opts={}){
           .filter(o=>head.some(h=>h!==t.idField&&String(o[h]).trim()!==""));
         if(name==="Suppliers")state.data[name]=state.data[name].filter(o=>o.Item||o.SRP);
       }
-      state.loaded=true;state.cached=false;state.error=null;
+      applyPending();
+      state.loaded=true;state.cached=false;if(!OB.failed.length)state.error=null;OB.netDown=false;
+      if(!OB.ops.length)OB.lastSync=Date.now(),obSave();
       applyLayoutFromSheet();saveCache();
-      setSync("ok","Synced "+hhmm(Date.now()));
+      syncLabel();
     }catch(e){
-      if(!opts.silent||!state.loaded)state.error=e;
-      setSync("err",state.cached?"Offline · saved "+hhmm(state.cached):"Sync failed");
+      if(isNetErr(e)){OB.netDown=true;if(!state.cached&&!state.loaded)state.error=e}
+      else if(!opts.silent||!state.loaded)state.error=e;
+      if(isNetErr(e))syncLabel();else setSync("err",state.cached?"Offline · saved "+hhmm(state.cached):"Sync failed");
     }finally{loading=null}
     safeRender();
   })();
@@ -184,13 +188,92 @@ function cellValue(type,v){
   return v;
 }
 
-/* ---------- saving: the change shows at once; the sheet is updated in the background, one change at a time ---------- */
+/* ---------- saving: the change shows at once and is kept on this device until the sheet has it ----------
+   Every add, edit, delete and file goes into an "outbox" saved in this browser (IndexedDB), so it survives closing
+   the app or restarting the iPad. The outbox is sent in order whenever there is internet. */
 let writeQ=Promise.resolve(),pendingWrites=0,reconcileT=0;const failed=[];
+const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+const OB={ops:[],failed:[],map:{},files:{},running:false,lastSync:0,netDown:false};
+let obSaveT=0;
+function obSave(){return IDB.set("outbox",{ops:OB.ops,failed:OB.failed,map:OB.map,files:OB.files,lastSync:OB.lastSync})}
+async function obLoad(){const o=await IDB.get("outbox");if(o){OB.ops=o.ops||[];OB.failed=o.failed||[];OB.map=o.map||{};OB.files=o.files||{};OB.lastSync=o.lastSync||0}}
+const isNetErr=e=>e&&(e.code==="offline"||e.code==="network");
+const online=()=>navigator.onLine!==false&&!OB.netDown;
+function setNet(){const d=$("#netDot"),t=$("#netText");if(!d)return;const on=online();d.className="dot "+(on?"ok":"err");t.textContent=on?"Online":"Offline";d.title=t.textContent}
 function syncLabel(){
-  if(pendingWrites)setSync("busy",`Saving${pendingWrites>1?" "+pendingWrites+" changes":""}…`);
-  else if(failed.length)setSync("err",`${failed.length} change${failed.length>1?"s":""} not saved`);
-  else setSync("ok","Saved "+hhmm(Date.now()));
+  setNet();
+  const n=OB.ops.length+pendingWrites,f=OB.failed.length+failed.length;
+  if(f)setSync("err",`${f} change${f>1?"s":""} couldn't sync`);
+  else if(n&&!online())setSync("wait",`${n} waiting to sync`);
+  else if(n)setSync("busy",`Syncing ${n} change${n>1?"s":""}…`);
+  else if(!online())setSync("wait",OB.lastSync?"Saved "+hhmm(OB.lastSync):"Not synced yet");
+  else setSync("ok","Synced "+hhmm(OB.lastSync||Date.now()));
 }
+/* the sheet column that identifies a record, so a late change still finds the right row */
+function matchOf(name,rec){
+  const t=TABS[name],f=t.idField||(name==="Settings"?"Key":null);if(!f||!rec)return null;
+  const head=state.heads[name]||t.fields.map(x=>x[0]),col=head.indexOf(f),v=String(rec[f]??"").trim();
+  return col>=0&&v?{col,value:v}:null;
+}
+/* records not yet in the sheet get a temporary negative row number, so taps and edits still find them */
+let negSeq=0;const tmpRow=()=>-(Date.now()%1e8*10+(++negSeq%10));
+const refOf=o=>o._row>0?{row:o._row}:{tmp:o._tmp};
+const fieldsOf=rec=>{const o={};Object.keys(rec).forEach(k=>{if(k[0]!=="_")o[k]=rec[k]});return o};
+function obAdd(op){op.id=op.id||uid();op.at=Date.now();OB.ops.push(op);obSave();syncLabel();obRun()}
+/* files picked offline get a temporary id ("local-…") until they are uploaded; swap in the real Google Drive id */
+const swapLocal=v=>typeof v==="string"&&v.includes("local-")?v.replace(/local-[a-z0-9]+/g,m=>OB.files[m]||m):v;
+function rowOfRef(ref){const m=ref.tmp&&OB.map[ref.tmp];return (ref.row>0&&ref.row)||(m&&(m.row||m))||0}
+async function obExec(op){
+  if(op.type==="append"){
+    const j=await api({action:"append",sheet:op.sheet,values:op.values.map(swapLocal)});
+    if(j.row){OB.map[op.tmp]={row:j.row,sheet:op.sheet};const r=state.data[op.name].find(o=>o._tmp===op.tmp);if(r){r._row=j.row;delete r._pending}}
+    return}
+  if(op.type==="update"||op.type==="delete"){
+    const row=rowOfRef(op.ref);if(!row&&!op.match)throw {code:"bad_row",message:"This record was never added to the sheet."};
+    const j=await api({action:op.type,sheet:op.sheet,row:row||2,values:op.type==="update"?op.values.map(v=>v==null?null:swapLocal(v)):undefined,match:op.match||undefined});
+    if(op.type==="delete"){const R=j.row||row;
+      state.data[op.name].forEach(o=>{if(o._row>R)o._row--});
+      OB.ops.forEach(o=>{if(o!==op&&o.sheet===op.sheet&&o.ref&&o.ref.row>R)o.ref.row--});
+      Object.values(OB.map).forEach(m=>{if(m&&m.sheet===op.sheet&&m.row>R)m.row--})}
+    return}
+  if(op.type==="upload"){
+    const f=await IDB.get("file:"+op.local);if(!f){return}
+    const j=await api({action:"upload",sheet:op.sheet,label:op.label,data:f.data,mime:f.mime,name:f.name});
+    OB.files[op.local]=j.id;seedThumb(j.id,f.info||{mime:f.mime,name:f.name});
+    Object.values(state.data).forEach(list=>list.forEach(o=>{if(String(o.Photos||"").includes(op.local))o.Photos=swapLocal(o.Photos)}));
+    IDB.del("file:"+op.local);delete localInfo[op.local];saveCache();return}
+  if(op.type==="trash"){await api({action:"trash",id:op.fileId}).catch(e=>{if(isNetErr(e))throw e});return}
+}
+async function obRun(){
+  if(OB.running||!cfg.api||!cfg.key||!OB.ops.length){syncLabel();return}
+  if(navigator.onLine===false){syncLabel();return}
+  OB.running=true;syncLabel();let did=0;
+  try{
+    while(OB.ops.length){
+      const op=OB.ops[0];
+      try{await obExec(op);OB.netDown=false;did++}
+      catch(e){
+        if(isNetErr(e)){OB.netDown=true;break}
+        op.tries=(op.tries||0)+1;
+        if(op.tries<2&&e.code!=="bad_row"&&e.code!=="too_big")break; /* try once more on the next round */
+        op.error=errMsg(e);OB.failed.push(op);state.error={code:"unsaved",message:op.label,inner:e};
+      }
+      OB.ops.shift();await obSave();syncLabel();
+    }
+  }finally{
+    OB.running=false;if(!OB.ops.length&&did){OB.lastSync=Date.now();obSave();scheduleReconcile()}
+    syncLabel();safeRender();
+  }
+}
+/* re-apply changes that are still waiting on top of fresh data from the sheet, so nothing disappears from the screen */
+function applyPending(){
+  const find=(name,op)=>{const L=state.data[name];return (op.ref&&op.ref.tmp&&L.find(o=>o._tmp===op.ref.tmp))||(op.match&&L.find(o=>String(o[(state.heads[name]||[])[op.match.col]]||"").trim()===op.match.value))||(op.ref&&op.ref.row&&L.find(o=>o._row===op.ref.row))};
+  [...OB.ops,...OB.failed].forEach(op=>{if(!op.name||!state.data[op.name])return;const L=state.data[op.name];
+    if(op.type==="append"){if(!L.some(o=>o._tmp===op.tmp))L.push({...op.fields,_row:rowOfRef({tmp:op.tmp})||tmpRow(),_pending:true,_tmp:op.tmp})}
+    else if(op.type==="update"){const r=find(op.name,op);if(r)Object.assign(r,op.fields)}
+    else if(op.type==="delete"){const r=find(op.name,op);if(r)L.splice(L.indexOf(r),1)}});
+}
+/* the old in-memory queue, still used for the dashboard layout setting */
 function enqueue(job){
   pendingWrites++;syncLabel();
   const p=writeQ.then(()=>job.run());
@@ -199,10 +282,11 @@ function enqueue(job){
     if(job.quiet){job.quiet(e)}else{failed.push(job);state.error={code:"unsaved",message:job.label,inner:e}}
     syncLabel();safeRender();throw e});
 }
-function scheduleReconcile(ms=6000){clearTimeout(reconcileT);reconcileT=setTimeout(()=>{if(!pendingWrites)loadAll({silent:true})},ms)}
+function scheduleReconcile(ms=6000){clearTimeout(reconcileT);reconcileT=setTimeout(()=>{if(!pendingWrites&&!OB.ops.length)loadAll({silent:true})},ms)}
 function retryFailed(){
-  const jobs=failed.splice(0);state.error=null;render();
+  const jobs=failed.splice(0);OB.ops.unshift(...OB.failed.splice(0).map(o=>{delete o.tries;delete o.error;return o}));obSave();state.error=null;OB.netDown=false;render();
   jobs.forEach(j=>enqueue(j).then(()=>{toast(j.label.replace(/^Couldn't save/,"Saved"));scheduleReconcile()}).catch(()=>{}));
+  obRun();
 }
 function rowValues(name,rec,isNew,orig){
   const t=TABS[name];const head=state.heads[name]||t.fields.map(f=>f[0]);
@@ -218,31 +302,83 @@ function rowValues(name,rec,isNew,orig){
 async function saveRecord(name,rec,isNew,orig,opt={}){
   const t=TABS[name];
   const values=rowValues(name,rec,isNew,orig);
-  let target;
-  if(isNew){target={...rec,_row:null,_pending:true};state.data[name].push(target)}
-  else{target=orig;if(!values.some(v=>v!==null)){return true}Object.assign(orig,rec,{_row:orig._row})}
-  saveCache();if(!opt.noRender)safeRender();
-  if(!opt.silent)toast(isNew?t.title+" added":t.title+" saved");
   const label=`Couldn't save ${t.title.toLowerCase()}${rec.Client?" for "+rec.Client:""}`;
-  const job={label,quiet:opt.quiet,run:async()=>{
-    if(isNew){const j=await api({action:"append",sheet:t.sheet,values});
-      if(j.row){target._row=j.row;delete target._pending;saveCache()}else scheduleReconcile(1200);return j}
-    if(!target._row)throw {code:"bad_row",message:"This record is still being added. Wait a moment, then tap Try again."};
-    return api({action:"update",sheet:t.sheet,row:target._row,values});
-  }};
-  enqueue(job).then(()=>scheduleReconcile()).catch(()=>{});
+  /* the dashboard layout setting keeps its own simple path */
+  if(name==="Settings"){
+    let target;if(isNew){target={...rec,_row:null,_pending:true};state.data[name].push(target)}else{target=orig;if(!values.some(v=>v!==null))return true;Object.assign(orig,rec,{_row:orig._row})}
+    saveCache();
+    enqueue({label,quiet:opt.quiet,run:async()=>{if(isNew){const j=await api({action:"append",sheet:t.sheet,values});if(j.row){target._row=j.row;delete target._pending}return j}
+      if(!target._row)throw {code:"bad_row"};return api({action:"update",sheet:t.sheet,row:target._row,values})}}).catch(()=>{});
+    return true;
+  }
+  let target,match=null,ref;
+  if(isNew){target={...rec,_row:tmpRow(),_pending:true,_tmp:uid()};state.data[name].push(target);ref={tmp:target._tmp}}
+  else{if(!values.some(v=>v!==null))return true;match=matchOf(name,orig);ref=refOf(orig);if(!(orig._row>0)&&!orig._tmp)orig._tmp=uid(),ref={tmp:orig._tmp};target=orig;Object.assign(orig,rec,{_row:orig._row,_tmp:orig._tmp})}
+  saveCache();if(!opt.noRender)safeRender();
+  if(!opt.silent)toast((isNew?t.title+" added":t.title+" saved")+(online()?"":" on this iPad · syncs when online"));
+  if(isNew)obAdd({type:"append",name,sheet:t.sheet,values,fields:fieldsOf(rec),tmp:target._tmp,label});
+  else{const changed={};(state.heads[name]||t.fields.map(f=>f[0])).forEach((h,i)=>{if(values[i]!==null)changed[h]=rec[h]});
+    obAdd({type:"update",name,sheet:t.sheet,values,fields:changed,ref,match,label})}
   return true;
 }
 async function deleteRecord(name,rec){
   const t=TABS[name];
   const list=state.data[name];const i=list.indexOf(rec);if(i>=0)list.splice(i,1);
   saveCache();safeRender();toast(t.title+" deleted");
-  const job={label:`Couldn't delete ${t.title.toLowerCase()}`,run:async()=>{
-    if(!rec._row)throw {code:"bad_row",message:"This record was still being added. Tap Try again."};
-    const j=await api({action:"delete",sheet:t.sheet,row:rec._row});
-    state.data[name].forEach(o=>{if(o._row>rec._row)o._row--});saveCache();return j}};
-  enqueue(job).then(()=>scheduleReconcile()).catch(()=>{});
+  /* never reached the sheet: just forget it */
+  if(!(rec._row>0)&&rec._tmp&&OB.ops.some(o=>o.tmp===rec._tmp)){OB.ops=OB.ops.filter(o=>o.tmp!==rec._tmp&&!(o.ref&&o.ref.tmp===rec._tmp));obSave();syncLabel();return true}
+  obAdd({type:"delete",name,sheet:t.sheet,ref:refOf(rec),match:matchOf(name,rec),label:`Couldn't delete ${t.title.toLowerCase()}`});
   return true;
+}
+/* ---------- files: upload now when online, or keep on this device and upload later ---------- */
+const localInfo={};
+async function uploadOrQueue(body,info){
+  if(online()){
+    try{const j=await api({action:"upload",...body});seedThumb(j.id,info);return j.id}
+    catch(e){if(!isNetErr(e))throw e;OB.netDown=true;syncLabel()}
+  }
+  const local="local-"+uid().replace(/[^a-z0-9]/g,"");
+  await IDB.set("file:"+local,{data:body.data,mime:body.mime,name:body.name,info});
+  localInfo[local]=info;
+  obAdd({type:"upload",local,sheet:body.sheet,label:body.label});
+  return local;
+}
+/* remove a file: one still waiting on this device is simply dropped; one already in Drive is trashed (now or later) */
+function discardFile(id){
+  if(String(id).startsWith("local-")){if(OB.files[id]){discardFile(OB.files[id]);return}OB.ops=OB.ops.filter(o=>!(o.type==="upload"&&o.local===id));IDB.del("file:"+id);delete localInfo[id];obSave();syncLabel();return}
+  obAdd({type:"trash",fileId:id,label:"Couldn't remove a file"});
+}
+async function localThumb(id){
+  if(OB.files[id])return thumbInfo(OB.files[id]);
+  if(localInfo[id])return localInfo[id];
+  const f=await IDB.get("file:"+id);if(!f)throw {code:"thumb_failed"};
+  localInfo[id]=f.info||{mime:f.mime,name:f.name};return localInfo[id];
+}
+async function openLocalFile(id){
+  if(OB.files[id]){openFile(OB.files[id]);return}
+  const f=await IDB.get("file:"+id);if(!f){toast("This file is no longer on this device");return}
+  const url=b64ToURL(f.data,f.mime);
+  if(/^image\//.test(f.mime)){const v=document.createElement("div");v.className="viewer";v.innerHTML=`<div class="vimg"><img class="full" src="${url}" alt="Photo"></div><div class="hrow"><span class="pendnote">Saved on this iPad · uploads to Google Drive when online</span><button class="btn btn-sol" type="button" data-vclose>Close</button></div>`;
+    document.body.appendChild(v);v.addEventListener("click",e=>{if(e.target===v||e.target.closest("[data-vclose]"))v.remove()})}
+  else window.open(url,"_blank","noopener");
+}
+/* the sync panel: what is waiting, what failed, and a Sync now button */
+function openSyncPanel(){
+  const desc=o=>({append:"Add",update:"Edit",delete:"Delete",upload:"Upload file",trash:"Remove file"}[o.type]||o.type)+(o.name?" · "+(TABS[o.name]?TABS[o.name].title:o.name):"")+(o.fields&&o.fields.Client?" · "+o.fields.Client:o.fields&&o.fields.Title?" · "+o.fields.Title:"");
+  const v=document.createElement("div");v.className="viewer files";v.setAttribute("role","dialog");v.setAttribute("aria-label","Sync");
+  const draw=()=>{v.innerHTML=`<div class="allwrap syncp"><div class="hd"><h2>Sync</h2><button type="button" class="btn btn-sol btn-sm" data-vclose>Done</button></div>
+    <div class="sstat"><span class="dot ${online()?"ok":"err"}"></span><b>${online()?"Online":"Offline"}</b><span>${OB.lastSync?"Last synced "+hhmm(OB.lastSync):"Not synced yet"}</span></div>
+    <h3>Waiting to sync · ${OB.ops.length}</h3>${OB.ops.length?`<div class="slist3">${OB.ops.map(o=>`<div><span>${esc(desc(o))}</span><em>${esc(new Date(o.at).toLocaleString("en-PH",{month:"short",day:"numeric",hour:"numeric",minute:"2-digit"}))}</em></div>`).join("")}</div>`:`<p class="note">Nothing waiting. Everything is in your Google Sheet.</p>`}
+    ${OB.failed.length?`<h3 class="bad">Couldn't sync · ${OB.failed.length}</h3><div class="slist3">${OB.failed.map((o,i)=>`<div><span>${esc(desc(o))}<small>${esc(o.error||"")}</small></span><button type="button" class="btn btn-line btn-sm" data-sdrop="${i}">Discard</button></div>`).join("")}</div>`:""}
+    <div class="hrow"><button type="button" class="btn btn-sol" data-ssync ${OB.ops.length||OB.failed.length?"":"disabled"}>Sync now</button><button type="button" class="btn btn-line" data-sreload>Reload from sheet</button></div>
+    <p class="note">Changes you make offline are kept on this device, even if you close the app, and are sent to your Google Sheet in the same order once you're online. Open the app from your Home Screen so the device keeps them safely.</p></div>`};
+  draw();document.body.appendChild(v);
+  v.addEventListener("click",e=>{
+    if(e.target===v||e.target.closest("[data-vclose]")){v.remove();return}
+    const d=e.target.closest("[data-sdrop]");if(d){OB.failed.splice(+d.dataset.sdrop,1);if(!OB.failed.length&&state.error&&state.error.code==="unsaved")state.error=null;obSave();syncLabel();draw();render();return}
+    if(e.target.closest("[data-ssync]")){OB.netDown=false;retryFailed();setTimeout(draw,600);return}
+    if(e.target.closest("[data-sreload]")){v.remove();state.sheetIds={};state.error=null;loadAll();return}
+  });
 }
 /* small helper for the Settings tab (dashboard layout) */
 function saveSetting(key,value){
@@ -1337,6 +1473,7 @@ function flushThumbs(){
   }).catch(e=>batch.forEach(([,cb])=>cb.rej(e)));
 }
 function thumbInfo(id){
+  if(String(id).startsWith("local-"))return localThumb(id);
   if(thumbCache[id])return thumbCache[id];
   const saved=thumbLocal(id);
   if(saved){thumbCache[id]=Promise.resolve(saved);return thumbCache[id]}
@@ -1386,6 +1523,7 @@ function hydrateTiles(root){
   });
 }
 function openFile(id,kind){
+  if(String(id).startsWith("local-")){openLocalFile(id);return}
   if(kind&&kind!=="image"){window.open(driveURL(id),"_blank","noopener");return}
   openViewer(id);
 }
@@ -1591,7 +1729,7 @@ function openForm(name,rec,prefill){
   /* photos and files */
   const strip=$("#fileStrip"),input=$("#fileInput");let allBox=null;
   const removeFile=id=>{ph.ids=ph.ids.filter(x=>x!==id);
-    if(ph.added.includes(id)){ph.added=ph.added.filter(x=>x!==id);api({action:"trash",id}).catch(()=>{})}else ph.removed.push(id);renderFiles()};
+    if(ph.added.includes(id)){ph.added=ph.added.filter(x=>x!==id);discardFile(id)}else ph.removed.push(id);renderFiles()};
   const renderFiles=()=>{
     if(!strip)return;
     const recent=ph.ids.slice(-5).reverse(),extra=ph.ids.length-recent.length;
@@ -1623,9 +1761,9 @@ function openForm(name,rec,prefill){
       ph.busy+=files.length;renderFiles();
       const one=async f=>{
         try{const s=await prepareUpload(f);const {preview,...body}=s;
-          const j=await api({action:"upload",sheet:t.sheet,label:label(),...body});
-          seedThumb(j.id,{mime:s.mime,name:s.name,size:f.size,url:preview||null});
-          ph.ids.push(j.id);ph.added.push(j.id)}
+          const id=await uploadOrQueue({sheet:t.sheet,label:label(),...body},{mime:s.mime,name:s.name,size:f.size,url:preview||null});
+          if(id.startsWith("local-"))toast("No internet: file saved on this iPad, uploads when online");
+          ph.ids.push(id);ph.added.push(id)}
         catch(e){toast(e&&(e.code==="too_big"||e.code==="bad_file")?e.message:"Upload failed: "+errMsg(e))}
         finally{ph.busy--;renderFiles()}
       };
@@ -1634,7 +1772,7 @@ function openForm(name,rec,prefill){
   }
 
   const close=(saved)=>{
-    if(!saved)ph.added.forEach(id=>api({action:"trash",id}).catch(()=>{}));
+    if(!saved)ph.added.forEach(id=>discardFile(id));
     if(allBox){allBox.remove();allBox=null}
     closeModal=null;$("#modalRoot").innerHTML="";document.documentElement.classList.remove("modal-open");
   };
@@ -1658,7 +1796,7 @@ function openForm(name,rec,prefill){
     if(newPays.length)r.Payments=[String(r.Payments||"").trim(),...newPays].filter(Boolean).join("\n");
     if(t.fields.some(f=>f[2]==="photos"))r.Photos=ph.ids.join(", ");
     const b=$("#saveBtn");b.disabled=true;b.textContent="Saving…";
-    if(await saveRecord(name,r,isNew,rec)){ph.removed.forEach(id=>api({action:"trash",id}).catch(()=>{}));close(true)}
+    if(await saveRecord(name,r,isNew,rec)){ph.removed.forEach(id=>discardFile(id));close(true)}
     else{b.disabled=false;b.textContent=isNew?"Add":"Save"}
   };
   const del=$("#delBtn");
@@ -2480,7 +2618,7 @@ function openQuote(){
       if(c&&$("#q-drive")&&$("#q-drive").checked){
         btn.textContent="Saving to Drive…";
         try{const data=await new Promise((res,rej)=>{const fr=new FileReader();fr.onload=()=>res(String(fr.result).split(",")[1]);fr.onerror=rej;fr.readAsDataURL(blob)});
-          const j=await api({action:"upload",sheet:TABS.Clients.sheet,label:c.Client||"",data,mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",name:fname});
+          const fid=await uploadOrQueue({sheet:TABS.Clients.sheet,label:c.Client||"",data,mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",name:fname},{mime:"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",name:fname});const j={id:fid};
           const pk=runs.map((x,i)=>({name:`Package ${i+1} — ${x.label}: ${sysText(x.r)}`,price:x.r.contract}));
           const rec={...c,Photos:[...photoIds(c.Photos),j.id].join(","),Quotation:prevSent?"Revised":"Sent","Quote Date":q.date,Packages:serializePackages(pk),"Package Costs":serializePackages(runs.map((x,i)=>({name:pk[i].name,price:Math.round(x.r.totalCost)}))),"Quoted Price":pk.length===1?pk[0].price:Math.min(...pk.map(p=>p.price))};
           if(rec["Chosen Package"]&&!pk.some(p=>p.name===rec["Chosen Package"]))rec["Chosen Package"]="";
@@ -2820,7 +2958,8 @@ window.addEventListener("resize",()=>{setVH();clearTimeout(resizeT);resizeT=setT
   if(state.view==="clients"&&nNow!==lastNarrow){lastNarrow=nNow;render();return}
   lastGrid=gNow;lastNarrow=nNow;
   if(state.view==="home"||state.view==="calc")drawCharts(false);if(state.view==="home")fitLists()},150)});
-$("#refreshBtn").onclick=()=>{state.sheetIds={};state.error=null;loadAll()};
+$("#refreshBtn").onclick=()=>{state.sheetIds={};state.error=null;OB.netDown=false;if(OB.ops.length)obRun();loadAll()};
+$("#syncBtn").onclick=()=>openSyncPanel();
 $("#settingsBtn").onclick=()=>{if(state.edit)finishEdit();state.view="settings";render()};
 
 /* ---------- boot: show the saved copy at once, then refresh from the sheet ---------- */
@@ -2832,12 +2971,17 @@ const sv=lsGet("solarays.view");if(sv&&VIEWS.some(x=>x[0]===sv))state.view=sv;
 if(location.hash&&VIEWS.some(x=>x[0]===location.hash.slice(1)))state.view=location.hash.slice(1);
 lastGrid=innerWidth+"x"+innerHeight;
 (async()=>{
+  await obLoad();
   if(cfg.api&&cfg.key){await loadCache();if(state.cached)setSync("busy","Updating…")}
-  render();
-  if(cfg.api&&cfg.key)loadAll();
+  render();syncLabel();
+  if(cfg.api&&cfg.key){if(OB.ops.length)obRun();loadAll()}
 })();
-window.addEventListener("online",()=>{if(cfg.api&&cfg.key&&(state.error||state.cached))loadAll()});
-document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"&&cfg.api&&cfg.key&&state.loaded&&!pendingWrites&&!$("#modalRoot").innerHTML)loadAll({silent:true})});
+/* back online: send what is waiting, then refresh */
+window.addEventListener("online",()=>{OB.netDown=false;syncLabel();if(!cfg.api||!cfg.key)return;if(OB.ops.length)obRun();else if(state.error||state.cached)loadAll()});
+window.addEventListener("offline",()=>{OB.netDown=true;syncLabel()});
+/* keep trying quietly while changes are waiting */
+setInterval(()=>{if(OB.ops.length&&!OB.running&&navigator.onLine!==false&&document.visibilityState==="visible"){OB.netDown=false;obRun()}},30000);
+document.addEventListener("visibilitychange",()=>{if(document.visibilityState!=="visible"||!cfg.api||!cfg.key)return;if(OB.ops.length){OB.netDown=false;obRun();return}if(state.loaded&&!pendingWrites&&!$("#modalRoot").innerHTML)loadAll({silent:true})});
 
 /* ---------- installable app: works from the home screen and opens instantly ---------- */
 if("serviceWorker" in navigator&&location.protocol==="https:"){

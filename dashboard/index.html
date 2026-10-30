@@ -20,8 +20,8 @@
 <link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400..900&display=swap">
 <link rel="stylesheet" href="vendor/bootstrap.min.css?v=9f8ec6d5e0">
-<link rel="stylesheet" href="css/app.css?v=5d0b9d8344">
-<script defer src="js/app.js?v=f51e73c980"></script>
+<link rel="stylesheet" href="css/app.css?v=f908105cf3">
+<script defer src="js/app.js?v=bb9520da72"></script>
 </head>
 <body>
 <div class="app" id="app">
@@ -29,7 +29,10 @@
     <button type="button" class="brand" data-view="home" aria-label="SolaRays dashboard home"><span class="bn"><span class="s">Sola</span>Rays</span><small>Business Dashboard</small></button>
     <nav class="nav" id="nav" aria-label="Sections"></nav>
     <div class="foot">
-      <div class="sync" role="status" aria-live="polite"><span class="dot" id="dot"></span><span id="syncText">Starting…</span></div>
+      <button type="button" class="sync" id="syncBtn" role="status" aria-live="polite" title="Sync details">
+        <span class="srow"><span class="dot" id="netDot"></span><span id="netText">Checking…</span></span>
+        <span class="srow"><span class="dot" id="dot"></span><span id="syncText">Starting…</span></span>
+      </button>
       <button class="btn btn-line btn-sm" id="refreshBtn" type="button" aria-label="Refresh data from Google Sheets" title="Refresh data"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8 8 0 0 0-14.5-4.5L4 8M4 4v4h4M4 13a8 8 0 0 0 14.5 4.5L20 16M20 20v-4h-4"/></svg><span>Refresh data</span></button>
       <button class="btn btn-line btn-sm" id="settingsBtn" type="button" aria-label="Database settings" title="Database"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v13c0 1.7 3.6 3 8 3s8-1.3 8-3v-13M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/></svg><span>Database</span></button>
     </div>
