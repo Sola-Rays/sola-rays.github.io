@@ -33,7 +33,7 @@ const SHORT={home:"Home",calc:"Calc"};
 const SOURCES=["Facebook page","Facebook ad","Facebook Marketplace","Messenger inquiry","Personal visit (I went to the client)","Walk-in (client came to us)","Referral · past client","Referral · friend or family","Referral · supplier or partner","Phone call or text","GSIS / government office","Seminar or event","Flyer or tarpaulin","Website / Google","TikTok or YouTube","Repeat client","Other"];
 
 /* Each section maps to a tab of the Google Sheet. Field keys are the sheet's column headers, exactly as written there.
-   New columns (Source, Package Costs, Job Cost) are added to the sheet automatically the first time v2 loads. */
+   New columns (Source, Package Costs, Job Cost, Rating, Warranty (yrs), Active) are added to the sheet automatically the first time v2 loads. */
 const TABS={
  Clients:{sheet:"CRM Dashboard",key:"clients",title:"Client",idField:"S.N.",idMode:"serial",filterField:"Consulted (Y/N)",filterOpts:["Yes","No"],fields:[
   ["S.N.","No.","hidden"],["Client","Client name","text"],["Phone","Phone","text"],["Facebook","Facebook","link","fb"],
@@ -54,7 +54,8 @@ const TABS={
   ["Start Date","Start date","date"],["Completion Date","Completion date","date"],["Notes","Notes","textarea"],["Photos","Photos","photos"]]},
  Suppliers:{sheet:"Suppliers",key:"suppliers",title:"Supplier item",idField:null,filterField:"Item",filterOpts:["PV Module","Inverter","Battery","Accessories"],fields:[
   ["Supplier","Supplier","text"],["Item","Category","select",["PV Module","Inverter","Battery","Accessories"]],
-  ["Brand","Brand","text"],["Specs / Description","Specs / description","textarea"],["SRP","Price (₱)","number"],["Photos","Photos","photos"]]},
+  ["Brand","Brand","text"],["Rating","Size / rating","text"],["Specs / Description","Specs / description","textarea"],["SRP","Price (₱)","number"],
+  ["Warranty (yrs)","Warranty (years)","number"],["Active","Use in calculator","select",["Yes","No"]],["Photos","Photos","photos"]]},
  Calendar:{sheet:"Calendar",key:"calendar",title:"Event",idField:"ID",idMode:"prefix",prefix:"EV",filterField:"Type",filterOpts:[],fields:[
   ["ID","ID","hidden"],["Title","Title","text"],["Type","Type","select",[]],["Status","Status","select",["Scheduled","Done","Cancelled"]],
   ["Date","Date","date"],["Start Time","Start time","time"],["End Time","End time","time"],
@@ -376,7 +377,7 @@ function calendarView(){
   for(let i=0;i<rows*7;i++){
     const d=new Date(Y,M-1,1-lead+i),iso=isoOf(d),out=d.getMonth()!==M-1,list=byDay[iso]||[];
     const shown=list.slice(0,3),more=list.length-shown.length;
-    cells+=`<div class="day${out?" out":""}${iso===t?" today":""}${iso===cal.sel?" sel":""}" role="gridcell" tabindex="0" data-cal-day="${iso}" aria-label="${esc(fmtDate(iso))}, ${list.length} event${list.length===1?"":"s"}"><span class="dn">${d.getDate()}</span><div class="evs">${shown.map(e=>evButton(e,true)).join("")}${more>0?`<span class="more">+${more} more</span>`:""}</div><div class="dots">${list.slice(0,4).map(e=>`<i style="background:${typeColor(e.type)}"></i>`).join("")}</div></div>`;
+    cells+=`<div class="day${out?" out":""}${d.getDay()%6===0?" we":""}${list.some(e=>e.type==="Installation")?" inst":""}${iso===t?" today":""}${iso===cal.sel?" sel":""}" role="gridcell" tabindex="0" data-cal-day="${iso}" aria-label="${esc(fmtDate(iso))}, ${list.length} event${list.length===1?"":"s"}"><span class="dn">${d.getDate()}</span><div class="evs">${shown.map(e=>evButton(e,true)).join("")}${more>0?`<span class="more">+${more} more</span>`:""}</div><div class="dots">${list.slice(0,4).map(e=>`<i style="background:${typeColor(e.type)}"></i>`).join("")}</div></div>`;
   }
   const selList=byDay[cal.sel]||[];
   const upcoming=all.filter(e=>e.iso>cal.sel&&e.iso>=t&&e.status!=="Cancelled").slice(0,10);
@@ -384,14 +385,50 @@ function calendarView(){
   const selName=new Date(+cal.sel.slice(0,4),+cal.sel.slice(5,7)-1,+cal.sel.slice(8,10)).toLocaleDateString("en-PH",{weekday:"long",month:"long",day:"numeric"});
   const monthEvents=all.filter(e=>e.iso.slice(0,7)===cal.month);
   const counts=EVENT_TYPES.map(([n])=>allEvents().filter(e=>e.iso.slice(0,7)===cal.month&&e.type===n).length);
+  const cv=["month","week","list"].includes(cal.view)?cal.view:"month";
+  /* summary: what this month holds and what needs attention */
+  const every=allEvents(),mAll=every.filter(e=>e.iso.slice(0,7)===cal.month);
+  const nextOf=type=>every.find(e=>e.type===type&&e.iso>=t&&e.status!=="Cancelled"&&e.status!=="Done");
+  const nInst=nextOf("Installation"),nVisit=nextOf("Site visit / Consultation");
+  const overdue=every.filter(e=>e.src==="Calendar"&&e.iso<t&&e.status==="Scheduled");
+  const wkStart=(()=>{const d=new Date(+t.slice(0,4),+t.slice(5,7)-1,+t.slice(8,10));d.setDate(d.getDate()-d.getDay());return isoOf(d)})();
+  const wkEnd=(()=>{const d=new Date(+wkStart.slice(0,4),+wkStart.slice(5,7)-1,+wkStart.slice(8,10)+6);return isoOf(d)})();
+  const thisWeek=every.filter(e=>e.iso>=wkStart&&e.iso<=wkEnd&&e.status!=="Cancelled");
+  const short=iso=>fmtDate(iso).replace(/, \d{4}$/,"");
+  const cstat=(l,v,sub,c,attr="")=>`<button type="button" class="cstat" style="--c:${c}" ${attr}><i></i><span class="l">${l}</span><b>${v}</b><span class="s">${esc(sub)}</span></button>`;
+  const stats=`<div class="cstats">
+    ${cstat("This week",thisWeek.length,thisWeek.length?`${thisWeek.filter(e=>e.type==="Installation").length} installs · ${thisWeek.filter(e=>e.type==="Site visit / Consultation").length} site visits`:"Nothing booked yet","#FFB612",`data-cal-go="${t}" data-cal-view="week"`)}
+    ${cstat("Next install",nInst?short(nInst.iso):"None",nInst?nInst.client||nInst.title:"Schedule one from Projects","#FFB612",nInst?`data-cal-go="${nInst.iso}"`:"")}
+    ${cstat("Next site visit",nVisit?short(nVisit.iso):"None",nVisit?nVisit.client||nVisit.title:"Book consultations here","#6CB4FF",nVisit?`data-cal-go="${nVisit.iso}"`:"")}
+    ${cstat("Past, not done",overdue.length,overdue.length?"Mark them Done or move them":"All caught up",overdue.length?"#FF7A59":"#4FD18B",overdue.length?`data-cal-go="${overdue[overdue.length-1].iso}"`:"")}
+    ${cstat(esc(first.toLocaleDateString("en-PH",{month:"long"})),mAll.length,`${mAll.filter(e=>e.status==="Done").length} done · ${mAll.filter(e=>e.status!=="Done"&&e.status!=="Cancelled").length} to do`,"#B9A6FF")}
+  </div>`;
+  const vseg=`<div class="seg" role="tablist" aria-label="Calendar view">${[["month","Month"],["week","Week"],["list","List"]].map(([k,l])=>`<button type="button" class="btn${cv===k?" on":""}" data-cal-view="${k}" aria-pressed="${cv===k}">${l}</button>`).join("")}</div>`;
+  /* week view: the week of the selected day, hour by hour */
+  const selD=new Date(+cal.sel.slice(0,4),+cal.sel.slice(5,7)-1,+cal.sel.slice(8,10));const ws=new Date(selD);ws.setDate(selD.getDate()-selD.getDay());
+  const wdays=Array.from({length:7},(_,i)=>{const d=new Date(ws);d.setDate(ws.getDate()+i);return d});
+  const H0=7,H1=19,hm=x=>{const [h,m]=x.split(":").map(Number);return h+m/60};
+  const weekHTML=()=>`<section class="card week"><div class="wkhead"><span></span>${wdays.map(d=>{const iso=isoOf(d);return `<button type="button" class="wkd${iso===t?" today":""}${iso===cal.sel?" sel":""}" data-cal-day="${iso}"><span>${d.toLocaleDateString("en-PH",{weekday:"short"})}</span><b>${d.getDate()}</b></button>`}).join("")}</div>
+    <div class="wkall"><span>All day</span>${wdays.map(d=>{const iso=isoOf(d);return `<div class="wkac">${(byDay[iso]||[]).filter(e=>!e.start).map(e=>evButton(e,true)).join("")}</div>`}).join("")}</div>
+    <div class="wkgrid" data-keep="week" style="--h:${H1-H0}"><div class="wkhrs">${Array.from({length:H1-H0},(_,i)=>`<span>${fmtTime(pad(H0+i)+":00").replace(":00","")}</span>`).join("")}</div>
+      ${wdays.map(d=>{const iso=isoOf(d);const list=(byDay[iso]||[]).filter(e=>e.start);
+        return `<div class="wkcol${iso===t?" today":""}" data-cal-day="${iso}">${list.map(e=>{const a=Math.max(H0,hm(e.start)),b=Math.min(H1,Math.max(a+0.75,e.end?hm(e.end):a+1));
+          return `<button type="button" class="wkev ${e.status==="Cancelled"?"cx":""} ${e.status==="Done"?"dn":""}" data-edit="${e.src}" data-row="${e.row}" style="--c:${typeColor(e.type)};top:calc(${(a-H0)/(H1-H0)*100}% + 1px);height:calc(${(b-a)/(H1-H0)*100}% - 2px)"><b>${esc(fmtTime(e.start))}</b><span>${esc(e.title)}</span></button>`}).join("")}
+          ${iso===t?(()=>{const n=new Date(),h=n.getHours()+n.getMinutes()/60;return h>=H0&&h<=H1?`<i class="nowline" style="top:${(h-H0)/(H1-H0)*100}%"></i>`:""})():""}</div>`}).join("")}</div></section>`;
+  /* list view: the next 60 days, grouped by day */
+  const listHTML=()=>{const end=(()=>{const d=new Date();d.setDate(d.getDate()+60);return isoOf(d)})();
+    const up=all.filter(e=>e.iso>=t&&e.iso<=end);const days=[...new Set(up.map(e=>e.iso))];
+    return `<section class="card clist2"><div class="ch"><h2>Next 60 days</h2><span>${up.length} events</span></div><div class="agscroll" data-keep="clist">${days.length?days.map(iso=>{const d=new Date(+iso.slice(0,4),+iso.slice(5,7)-1,+iso.slice(8,10));
+      return `<div class="lday${iso===t?" today":""}"><button type="button" class="ldate" data-cal-go="${iso}" data-cal-view="month"><span>${d.toLocaleDateString("en-PH",{weekday:"short"})}</span><b>${d.getDate()}</b><em>${d.toLocaleDateString("en-PH",{month:"short"})}</em></button><div class="evlist">${byDay[iso].map(e=>evButton(e)).join("")}</div></div>`}).join(""):`<div class="empty">Nothing booked in the next 60 days.</div>`}</div></section>`};
   return `<div class="vw v-cal">
   ${header("Calendar",`${monthEvents.length} event${monthEvents.length===1?"":"s"} in ${esc(monthName)}`,
-    `<div class="mnav"><button type="button" class="iconbtn" data-cal-nav="-1" aria-label="Previous month">${UI.left}</button><b>${esc(monthName)}</b><button type="button" class="iconbtn" data-cal-nav="1" aria-label="Next month">${UI.right}</button></div>
+    `${vseg}<div class="mnav"><button type="button" class="iconbtn" data-cal-nav="${cv==="week"?"w-1":"-1"}" aria-label="Previous">${UI.left}</button><b>${esc(cv==="week"?`${wdays[0].toLocaleDateString("en-PH",{month:"short",day:"numeric"})} – ${wdays[6].toLocaleDateString("en-PH",{month:"short",day:"numeric"})}`:monthName)}</b><button type="button" class="iconbtn" data-cal-nav="${cv==="week"?"w1":"1"}" aria-label="Next">${UI.right}</button></div>
     <button type="button" class="btn btn-line" data-cal-nav="0">Today</button><button type="button" class="btn btn-sol" data-new="Calendar" data-date="${cal.sel}">${UI.plus}<span class="lbl">Add event</span></button>`)}
+  ${stats}
   <div class="tfilter hscroll">${EVENT_TYPES.map(([n,c],i)=>`<button type="button" class="chip tchip" data-cal-type="${esc(n)}" aria-pressed="${!cal.hidden.includes(n)}" style="--c:${c}"><i></i>${esc(n)}${counts[i]?` <span>${counts[i]}</span>`:""}</button>`).join("")}</div>
-  <div class="calwrap">
-    <section class="card month"><div class="wk">${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>`<span>${d}</span>`).join("")}</div><div class="mgrid" role="grid" style="--rows:${rows}">${cells}</div></section>
-    <section class="card agenda"><div class="ch"><h2>${esc(selName)}</h2><span>${selList.length} event${selList.length===1?"":"s"}</span></div>
+  <div class="calwrap cv-${cv}">
+    ${cv==="week"?weekHTML():cv==="list"?listHTML():`<section class="card month"><div class="wk">${["Sun","Mon","Tue","Wed","Thu","Fri","Sat"].map(d=>`<span>${d}</span>`).join("")}</div><div class="mgrid" role="grid" style="--rows:${rows}">${cells}</div></section>`}
+    <section class="card agenda"><div class="aghd"><span class="agn">${+cal.sel.slice(8,10)}</span><div><h2>${esc(selName)}</h2><span>${selList.length?`${selList.length} event${selList.length===1?"":"s"}${selList.some(e=>e.status==="Done")?" · "+selList.filter(e=>e.status==="Done").length+" done":""}`:"Free day"}</span></div></div>
       <div class="agscroll" data-keep="agenda">
         <div class="evlist">${selList.length?selList.map(e=>evButton(e)).join(""):`<div class="empty">Nothing scheduled.</div>`}</div>
         <button type="button" class="btn btn-line w-100" data-new="Calendar" data-date="${cal.sel}">+ Add event on ${esc(fmtDate(cal.sel).replace(/, \d{4}$/,""))}</button>
@@ -635,8 +672,9 @@ const LKEY="srv2.layout.one";const SKEY="dashboard.layout.one";
 function cleanLayout(L){
   const k=Array.isArray(L&&L.kpis)?L.kpis.filter((id,i,a)=>KPI_META[id]&&a.indexOf(id)===i):KPI_DEFAULT.slice();
   const p=Array.isArray(L&&L.panels)?L.panels.filter((id,i,a)=>PANEL_META[id]&&a.indexOf(id)===i):PANEL_DEFAULT.slice();
-  const sz={};Object.keys(PANEL_META).forEach(id=>{const w=L&&L.sizes&&+L.sizes[id];sz[id]=w>=1&&w<=4?Math.round(w):(PANEL_META[id][2]?2:1)});
-  return {kpis:k,panels:p,sizes:sz,at:(L&&L.at)||0};
+  /* panel widths in twelfths of the row (3 = ¼, 4 = ⅓, 6 = ½, 8 = ⅔, 9 = ¾, 12 = full); a panel without one shares its row equally */
+  const sp={};if(L&&L.spans)Object.keys(L.spans).forEach(id=>{const w=+L.spans[id];if(PANEL_META[id]&&SNAPS.includes(w))sp[id]=w});
+  return {kpis:k,panels:p,spans:sp,at:(L&&L.at)||0};
 }
 state.layout=(()=>{try{return cleanLayout(JSON.parse(lsGet(LKEY)||"null"))}catch(e){return cleanLayout(null)}})();
 function applyLayoutFromSheet(){
@@ -649,13 +687,24 @@ function storeLayout(sync){
   if(sync&&cfg.api)saveSetting(SKEY,JSON.stringify(state.layout));
 }
 
-/* Everything on one screen, packed in rows that always fill the full width.
-   Each panel has a width of 1 to 4 parts; a row holds up to "cols" parts and its panels stretch to fill it. */
-const panelW=id=>(state.layout.sizes&&state.layout.sizes[id])||(PANEL_META[id][2]?2:1);
-function packRows(ids,cols){
-  const rows=[];let cur=[],used=0;
-  ids.forEach(id=>{const w=Math.min(cols,panelW(id));if(cur.length&&used+w>cols){rows.push(cur);cur=[];used=0}cur.push({id,w});used+=w});
-  if(cur.length)rows.push(cur);return rows;
+/* Everything on one screen on a 12-column grid, so panel edges line up from row to row.
+   Panels you haven't sized share their row equally; a row always fills the full width. */
+const SNAPS=[3,4,6,8,9,12];
+const SNAP_LABEL={3:"¼",4:"⅓",6:"½",8:"⅔",9:"¾",12:"Full"};
+const spanOf=id=>(state.layout.spans&&state.layout.spans[id])||0;
+function packRows(ids,perRow){
+  const minS=12/perRow,rows=[];let cur=[],used=0;
+  ids.forEach(id=>{const s=Math.max(minS,spanOf(id)||minS);if(cur.length&&used+s>12){rows.push(cur);cur=[];used=0}cur.push({id,s,fixed:!!spanOf(id)});used+=s});
+  if(cur.length)rows.push(cur);
+  /* balance: no row ends up with a lone panel while the row above is crowded (7 panels → 3 + 2 + 2, not 3 + 3 + 1) */
+  for(let i=rows.length-1;i>0;i--){const A=rows[i-1],B=rows[i];
+    while(A.length>B.length+1&&!A[A.length-1].fixed&&B.reduce((a,x)=>a+x.s,0)+A[A.length-1].s<=12)B.unshift(A.pop())}
+  /* fill each row: free space goes to the auto panels first (equal shares), otherwise to every panel */
+  rows.forEach(r=>{let left=12-r.reduce((a,x)=>a+x.s,0);if(left<=0)return;
+    const auto=r.filter(x=>!x.fixed),pool=auto.length?auto:r;
+    if(auto.length){const tot=auto.reduce((a,x)=>a+x.s,0)+left,each=Math.floor(tot/auto.length);let extra=tot-each*auto.length;auto.forEach(x=>{x.s=each+(extra>0?1:0);extra--})}
+    else{let i=pool.length-1;while(left>0){pool[i].s++;left--;i=(i-1+pool.length)%pool.length}}});
+  return rows;
 }
 function splitEven(list,rows){const out=[];let i=0;for(let r=0;r<rows;r++){const n=Math.ceil((list.length-i)/(rows-r));out.push(list.slice(i,i+n));i+=n}return out}
 function dashFit(kpis,panels){
@@ -663,7 +712,7 @@ function dashFit(kpis,panels){
   const W=(m&&m.clientWidth?m.clientWidth:innerWidth)-(phone?24:36);
   const H=(m&&m.clientHeight?m.clientHeight:innerHeight)-(phone?20:30);
   if(phone||H<430){const cols=phone?1:2;return {phone:true,cols,krows:splitEven(kpis,Math.ceil(kpis.length/(phone?2:4))),rows:packRows(panels,cols),tight:false}}
-  const cols=W>=1150?4:W>=640?3:2;
+  const cols=W>=1060?4:W>=640?3:2; /* most panels side by side in one row */
   const kmax=Math.max(2,Math.min(8,Math.floor((W+10)/150)));
   const kr=kpis.length?Math.ceil(kpis.length/kmax):0;
   const rows=packRows(panels,cols);
@@ -675,7 +724,8 @@ function dashFit(kpis,panels){
 
 function ectl(kind,id,w,cols){
   if(!state.edit)return "";
-  const size=kind==="panel"?`<button type="button" data-size="${id}:-1" ${w<=1?"disabled":""} aria-label="Make narrower" title="Narrower">−</button><span class="wtag" aria-hidden="true">${w}/${cols}</span><button type="button" data-size="${id}:1" ${w>=cols?"disabled":""} aria-label="Make wider" title="Wider">+</button>`:"";
+  const minS=12/cols;
+  const size=kind==="panel"?`<button type="button" data-size="${id}:-1" ${w<=minS?"disabled":""} aria-label="Make narrower" title="Narrower">−</button><span class="wtag" aria-hidden="true">${spanOf(id)?SNAP_LABEL[w]||w+"/12":"Auto"}</span><button type="button" data-size="${id}:1" ${w>=12?"disabled":""} aria-label="Make wider" title="Wider">+</button>`:"";
   return `<div class="ectl"><span class="grip" title="Drag to move" aria-hidden="true">${UI.grip}</span><button type="button" data-move="${kind}:${id}:-1" aria-label="Move earlier">${UI.left}</button><button type="button" data-move="${kind}:${id}:1" aria-label="Move later">${UI.right}</button>${size}<button type="button" class="rm" data-remove="${kind}:${id}" aria-label="Remove">${UI.x}</button></div>${kind==="panel"?`<span class="rsz" data-rsz="${id}" title="Drag to resize" aria-hidden="true"></span>`:""}`;
 }
 function kpiHTML(id,k){
@@ -745,7 +795,7 @@ function panelBody(id,D){
 }
 function panelHTML(it,D,cols){
   const P=panelBody(it.id,D);const title=P.title||PANEL_META[it.id][0];const go=state.edit?"":P.go;
-  return `<section class="card pnl p-${it.id}${go?" tap":""}" data-lid="panel:${it.id}" ${go?`data-goto="${go}" tabindex="0"`:""} style="--w:${it.w}">${ectl("panel",it.id,it.w,cols)}<div class="ch"><h2>${esc(title)}</h2><span>${esc(P.sub||"")}</span></div>${P.body}</section>`;
+  return `<section class="card pnl p-${it.id}${go?" tap":""}" data-lid="panel:${it.id}" ${go?`data-goto="${go}" tabindex="0"`:""} style="--s:${it.s}">${ectl("panel",it.id,it.s,cols)}<div class="ch"><h2>${esc(title)}</h2><span>${esc(P.sub||"")}</span></div>${P.body}</section>`;
 }
 function homeView(){
   const D=dashCalc(),K=kpiDefs(D),L=state.layout,F=dashFit(L.kpis,L.panels);
@@ -756,7 +806,8 @@ function homeView(){
     ?`<span class="edithint">Drag a widget to move it · drag its right edge or use − + to resize · × to remove</span><button type="button" class="btn btn-line" data-dact="add">${UI.plus}<span class="lbl">Add widget</span></button><button type="button" class="btn btn-line" data-dact="reset">${UI.reset}<span class="lbl">Reset</span></button><button type="button" class="btn btn-sol" data-dact="done">Done</button>`
     :`<div class="seg" role="group" aria-label="Period">${seg}</div><button type="button" class="iconbtn" data-dact="edit" aria-label="Edit dashboard widgets" title="Edit widgets">${UI.edit}</button><button class="btn btn-line hide-sm" type="button" data-new="Projects">+ Project</button><button class="btn btn-sol hide-sm" type="button" data-new="Clients">+ Client</button>`;
   const empty=!L.kpis.length&&!L.panels.length?`<div class="empty big">Your dashboard is empty. Tap the pencil, then Add widget.</div>`:"";
-  const panels=F.rows.map(r=>`<div class="drow">${r.map(it=>panelHTML(it,D,F.cols)).join("")}</div>`).join("");
+  const guide=state.edit&&!F.phone?`<div class="gguide" aria-hidden="true">${"<i></i>".repeat(12)}</div>`:"";
+  const panels=guide+F.rows.map(r=>`<div class="drow">${r.map(it=>panelHTML(it,D,F.cols)).join("")}</div>`).join("");
   return `<div class="vw v-home${state.edit?" editing":""}${F.phone?" phone":""}${F.tight?" tight":""}" id="dash">
     <div class="dhead"><div class="dh-l"><h1><span class="gl">${greet}</span><span class="gs">Hi</span>, Raymund</h1><span class="sub">${date}</span></div><div class="acts">${acts}</div></div>
     ${state.edit&&F.tight?`<div class="fitnote">Your screen is full, so the widgets are getting small. Remove one or two for more room.</div>`:""}
@@ -791,20 +842,35 @@ function openAddPanel(){
   $("#sheet").addEventListener("change",e=>{const a=e.target.dataset.add;if(!a)return;const [kind,id]=a.split(":");const k=kind==="kpi"?"kpis":"panels";
     if(e.target.checked){if(!state.layout[k].includes(id))state.layout[k].push(id)}else state.layout[k]=state.layout[k].filter(x=>x!==id);storeLayout(false)});
 }
-function setSize(id,d){const c=dashFit(state.layout.kpis,state.layout.panels).cols;const w=Math.max(1,Math.min(c,panelW(id)+d));state.layout.sizes[id]=w;storeLayout(false);render()}
+/* − / + step through the snap sizes: ¼ ⅓ ½ ⅔ ¾ full */
+function curSpan(id){const F=dashFit(state.layout.kpis,state.layout.panels);for(const r of F.rows)for(const x of r)if(x.id===id)return {s:x.s,cols:F.cols};return {s:0,cols:F.cols}}
+function setSize(id,d){const {s,cols}=curSpan(id),minS=12/cols,list=SNAPS.filter(x=>x>=minS);
+  const n=d>0?list.find(x=>x>s):[...list].reverse().find(x=>x<s);if(!n)return;
+  state.layout.spans=state.layout.spans||{};state.layout.spans[id]=n;storeLayout(false);render()}
 /* drag a widget to move it, or drag a panel's right edge to resize it: works with a finger on iPad and with a mouse */
 let drag=null,pend=null,rsz=null;
 document.addEventListener("pointerdown",e=>{
   if(!state.edit||e.button>0)return;
   const r=e.target.closest&&e.target.closest("[data-rsz]");
-  if(r){e.preventDefault();const el=r.closest("[data-lid]"),row=el.parentElement;const cols=dashFit(state.layout.kpis,state.layout.panels).cols;
-    rsz={id:r.dataset.rsz,el,x:e.clientX,w:panelW(r.dataset.rsz),unit:(row.parentElement.getBoundingClientRect().width+12)/cols,cols,nw:panelW(r.dataset.rsz)};el.classList.add("resizing");return}
+  if(r){e.preventDefault();const el=r.closest("[data-lid]"),id=r.dataset.rsz,{s,cols}=curSpan(id);
+    const g=document.querySelector(".pgrid"),G=g.getBoundingClientRect(),gp=parseFloat(getComputedStyle(g).getPropertyValue("--dg"))||12,col=(G.width+gp)/12;
+    rsz={id,s0:s,ns:s,had:spanOf(id),cols,gp,col,gl:G.left,startCol:Math.round((el.getBoundingClientRect().left-G.left)/col)};document.querySelector(".pgrid").classList.add("resizing");el.classList.add("resizing");return}
   const el=e.target.closest&&e.target.closest(".editing [data-lid]");
   if(!el||e.target.closest(".ectl button,input,select,[data-rsz]"))return;
   pend={el,x:e.clientX,y:e.clientY};
 });
 document.addEventListener("pointermove",e=>{
-  if(rsz){e.preventDefault();const nw=Math.max(1,Math.min(rsz.cols,Math.round(rsz.w+(e.clientX-rsz.x)/rsz.unit)));if(nw!==rsz.nw){rsz.nw=nw;rsz.el.style.setProperty("--w",nw);const t=rsz.el.querySelector(".wtag");if(t)t.textContent=nw+"/"+rsz.cols}return}
+  if(rsz){e.preventDefault();
+    /* where the right edge would land on the 12-column grid, snapped to ¼ ⅓ ½ ⅔ ¾ full or to an edge of a panel in another row */
+    const el=document.querySelector(`[data-lid="panel:${rsz.id}"]`),g=document.querySelector(".pgrid");if(!el||!g)return;
+    const {gp,col,startCol}=rsz,want=(e.clientX-rsz.gl+gp/2)/col-startCol;
+    const edges=new Set();document.querySelectorAll(".drow").forEach(row=>{if(row.contains(el))return;let c=0;row.querySelectorAll(".pnl").forEach(p=>{c+=+getComputedStyle(p).getPropertyValue("--s")||0;edges.add(c-startCol)})});
+    const minS=12/rsz.cols;let opts=SNAPS.filter(x=>x>=minS&&startCol+x<=12);[...edges].forEach(x=>{if(x>=minS&&startCol+x<=12&&!opts.includes(x))opts.push(x)});
+    if(!opts.length)return;
+    let ns=opts.reduce((b,x)=>Math.abs(x-want)<Math.abs(b-want)?x:b,opts[0]);
+    if(ns!==rsz.ns){rsz.ns=ns;state.layout.spans=state.layout.spans||{};state.layout.spans[rsz.id]=ns;render();
+      const ne=document.querySelector(`[data-lid="panel:${rsz.id}"]`),ng=document.querySelector(".pgrid");if(ne)ne.classList.add("resizing");if(ng)ng.classList.add("resizing")}
+    return}
   if(pend&&!drag&&Math.hypot(e.clientX-pend.x,e.clientY-pend.y)>6){
     const el=pend.el,[kind,id]=el.dataset.lid.split(":"),r=el.getBoundingClientRect(),ghost=el.cloneNode(true);ghost.classList.add("ghost");
     Object.assign(ghost.style,{position:"fixed",left:r.left+"px",top:r.top+"px",width:r.width+"px",height:r.height+"px",margin:0,zIndex:90,pointerEvents:"none"});
@@ -818,7 +884,7 @@ document.addEventListener("pointermove",e=>{
 },{passive:false});
 const endDrag=()=>{
   pend=null;
-  if(rsz){const r=rsz;rsz=null;r.el.classList.remove("resizing");if(r.nw!==r.w){state.layout.sizes[r.id]=r.nw;storeLayout(false)}render();return}
+  if(rsz){const r=rsz;rsz=null;if(r.ns!==r.s0)storeLayout(false);render();return}
   if(!drag)return;const d=drag;drag=null;d.ghost.remove();d.el.classList.remove("dragging");if(d.target)moveBefore(d.kind,d.id,d.target,d.after);else render()};
 document.addEventListener("pointerup",endDrag);document.addEventListener("pointercancel",endDrag);
 
@@ -874,6 +940,7 @@ function searchHTML(k,ph){
 function listView(name){
   if(name==="Projects")return projectsView();
   if(name==="Clients")return clientsView();
+  if(name==="Suppliers")return suppliersView();
   const t=TABS[name],k=t.key;
   const q=state.q[k].toLowerCase();
   const all=state.data[name];
@@ -968,7 +1035,13 @@ function projectsView(){
   const pipe=`<div class="pipeline hscroll" role="group" aria-label="Installation pipeline">${PROJECT_STAGES.map(s=>{const n=all.filter(p=>p.Status===s).length;return `<button type="button" class="pstep ${f===s?"on":""}" data-filter="projects" data-val="${esc(s)}" style="--c:${STAGE_COLOR[s]}"><i></i><span>${esc(shortStage(s))}</span><b>${n}</b></button>`}).join("")}</div>`;
   const body=board
     ?`<div class="board">${PROJECT_STAGES.filter(s=>f==="All"||f==="Active"||f==="Balance"||f===s).map(s=>{const list=rows.filter(p=>p.Status===s);return `<section class="bcol" style="--c:${STAGE_COLOR[s]}"><div class="bh"><i></i><b>${esc(shortStage(s))}</b><span>${list.length}</span></div>${list.map(jobCard).join("")||'<div class="bempty">None</div>'}</section>`}).join("")}</div>`
-    :`<div class="list">${rows.length?rows.map(projItemHTML).join(""):`<div class="empty">${all.length?"No projects match this filter.":"No projects yet. Open a client and tap Signed? Project when they sign."}</div>`}</div>`;
+    :null;
+  /* list + details side by side on laptop and iPad; on a phone the list opens the project form */
+  const split=!board&&innerWidth>=900;
+  const order=p=>(p.Status==="Completed"?1:0);
+  rows.sort((a,b)=>order(a)-order(b)||String(toISO(b["Contract Date"])||"").localeCompare(String(toISO(a["Contract Date"])||""))||b._row-a._row);
+  let sel=split?(all.find(p=>p._row===state.psel)||rows[0]||null):null;
+  const listHTML=`<div class="list plist2">${rows.length?rows.map(p=>projCard(p,split,sel===p)).join(""):`<div class="empty">${all.length?"No projects match this filter.":"No projects yet. Open a client and tap Signed? Project when they sign."}</div>`}</div>`;
   return `<div class="vw v-projects">`+header("Projects",`${all.length} project${all.length===1?"":"s"} · From downpayment to switch-on`,
     `<div class="seg" role="group" aria-label="View"><button type="button" class="btn${!board?" on":""}" data-pview="list" aria-pressed="${!board}">List</button><button type="button" class="btn${board?" on":""}" data-pview="board" aria-pressed="${board}">Board</button></div><button class="btn btn-sol" type="button" data-new="Projects">${UI.plus}<span class="lbl">Add project</span></button>`)+
   `<div class="pstats hscroll">
@@ -981,7 +1054,156 @@ function projectsView(){
    ${pipe}
    <div class="toolbar">${searchHTML("projects","Search projects")}
      <div class="chips inline">${[["All","All"],["Active","Active"],["Balance","Balance due"]].map(([v,l])=>`<button type="button" class="chip" data-filter="projects" data-val="${v}" aria-pressed="${f===v}">${l}</button>`).join("")}</div></div>
-   <div class="vscroll" data-keep="plist">${body}</div></div>`;
+   ${board?`<div class="vscroll" data-keep="plist">${body}</div>`:split?`<div class="psplit"><div class="vscroll" data-keep="plist">${listHTML}</div><section class="card pdet" data-keep="pdet">${sel?projDetail(sel):`<div class="empty big">Pick a project to see its details.</div>`}</section></div>`:`<div class="vscroll" data-keep="plist">${listHTML}</div>`}</div>`;
+}
+
+/* ---------- GPS helpers ---------- */
+const GPS_ICON='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="7.5"/><path d="M12 1.5v3M12 19.5v3M1.5 12h3M19.5 12h3"/></svg>';
+/* read coordinates from "7.22 124.24", "7.22,124.24", a Google Maps link (…@7.22,124.24…, ?q=7.22,124.24, !3d7.22!4d124.24) */
+function parseCoords(t){
+  t=String(t||"").trim();if(!t)return "";
+  let m=t.match(/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/)||t.match(/@(-?\d+(?:\.\d+)?),\s*(-?\d+(?:\.\d+)?)/)||t.match(/[?&](?:q|query|ll|center|destination)=(-?\d+(?:\.\d+)?)(?:,|%2C)\s*(-?\d+(?:\.\d+)?)/i)
+    ||t.match(/^\s*(-?\d{1,2}(?:\.\d+)?)\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*$/);
+  if(!m)return "";const a=+m[1],b=+m[2];if(Math.abs(a)>90||Math.abs(b)>180)return "";
+  return `${m[1]}, ${m[2]}`;
+}
+function locateInto(inp,btn){
+  if(!navigator.geolocation){toast("This device can't share its location");return}
+  btn.classList.add("busy");toast("Getting your location… stand at the client's site for best accuracy");
+  navigator.geolocation.getCurrentPosition(p=>{btn.classList.remove("busy");
+    inp.value=`${p.coords.latitude.toFixed(7)}, ${p.coords.longitude.toFixed(7)}`;inp.dispatchEvent(new Event("input",{bubbles:true}));
+    toast(`Location added · accurate to about ${Math.round(p.coords.accuracy)} m`)},
+   e=>{btn.classList.remove("busy");toast(e.code===1?"Location is blocked. Allow location for this site in Settings → Safari (or your browser).":"Couldn't get your location. Try again outdoors.")},
+   {enableHighAccuracy:true,timeout:15000,maximumAge:0});
+}
+
+/* ---------- Suppliers: your buying prices, and how the Solar Calculator reads each item ---------- */
+/* what the calculator understands from one supplier row */
+function itemInfo(r){
+  const k=kindOfItem(r),price=num(r.SRP),wy=warrantyOf(r),chips=[];let st="ok",msg="";
+  if(!isActive(r))return {k,st:"off",msg:"Hidden from the calculator",chips};
+  if(!price)return {k,st:"warn",msg:"No price yet",chips};
+  if(k==="pv"){const w=wOf(r);if(w>=150){chips.push(w+" W",`₱${(price/w).toFixed(2)}/W`);msg="Used for panels"}else{st="warn";msg="Add the panel watts in Size / rating (e.g. 620W)"}}
+  else if(k==="inv"){const kw=kwOf(r);if(kw>0){chips.push(kw+" kW");if(/hybrid/i.test(specOf(r)))chips.push("Hybrid");chips.push(`₱${Math.round(price/kw).toLocaleString("en-PH")}/kW`);msg="Used for inverters"}else{st="warn";msg="Add the inverter size in Size / rating (e.g. 6kW)"}}
+  else if(k==="bat"){const kwh=kwhOf(r),v=batVolt(r);
+    if(v&&v<40){st="bad";msg=`${v}V battery: the calculator uses 48V / 51.2V batteries for hybrid inverters`}
+    else if(kwh>=1){chips.push((Math.round(kwh*100)/100)+" kWh");if(v)chips.push(v+"V");chips.push(`₱${Math.round(price/kwh).toLocaleString("en-PH")}/kWh`);msg="Used for batteries"}
+    else{st="warn";msg="Add the battery size in Size / rating (e.g. 5.12kWh or 51.2V 100Ah)"}}
+  else{const t=String(r["Specs / Description"])+" "+String(r.Brand||"")+" "+String(r.Rating||"");const m=ACC_NEEDS.find(([,re])=>re.test(t));
+    if(m)msg="Used for: "+m[0];else{st="idle";msg="Not used by the calculator (fine for extras)"}}
+  if(wy)chips.push(wy+"-yr");
+  return {k,st,msg,chips};
+}
+function supItemHTML(r){
+  const ids=photoIds(r.Photos),I=itemInfo(r);
+  const br=r.Brand&&r.Brand!=="-"?String(r.Brand).trim():"";
+  const seg=String(r["Specs / Description"]||"").split(",").map(x=>x.trim()).filter(x=>x&&!/^(hybrid|lifepo4|on-?grid|mono)$/i.test(x));
+  const model=(seg[0]||"").replace(new RegExp("^"+br.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")+"\\s*","i"),"");
+  const t=[br,model].filter(Boolean).join(" · ")||"Item";
+  const ico={ok:"✓",warn:"!",bad:"×",off:"–",idle:"·"}[I.st];
+  return `<button type="button" class="item sitem st-${I.st}" data-edit="Suppliers" data-row="${r._row}">
+    <span class="sthumb" ${ids.length?`data-thumb="${esc(ids[ids.length-1])}"`:""}>${FICON.image}</span>
+    <div class="m"><div class="t">${esc(t)}</div><div class="d">${esc(r.Supplier||"No supplier")}${r.Rating?" · "+esc(r.Rating):""}</div>
+      <div class="schips">${I.chips.map(c=>`<span>${esc(c)}</span>`).join("")}<em class="sst" title="${esc(I.msg)}"><i>${ico}</i>${esc(I.msg)}</em></div></div>
+    <div class="r"><span class="amt">${peso(r.SRP)}</span><span class="pill">${esc(r.Item||"?")}</span></div></button>`;
+}
+function suppliersView(){
+  const name="Suppliers",t=TABS[name],k=t.key,q=state.q[k].toLowerCase(),all=state.data[name];
+  const names=[...new Set(all.map(r=>String(r.Supplier||"").trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b));
+  if(state.supplier&&!names.includes(state.supplier))state.supplier="";
+  const bySup=state.supplier?all.filter(r=>String(r.Supplier||"").trim()===state.supplier):all;
+  const info=new Map(all.map(r=>[r,itemInfo(r)]));
+  const needs=r=>["warn","bad"].includes(info.get(r).st);
+  const KMAP={"PV Module":"pv",Inverter:"inv",Battery:"bat",Accessories:"acc"};
+  const f=state.filter[k];
+  let rows=bySup.filter(r=>(f==="All"||(f==="Needs info"?needs(r):KMAP[f]===info.get(r).k))&&(!q||Object.values(r).join(" ").toLowerCase().includes(q)));
+  const ORDER={pv:0,inv:1,bat:2,acc:3};
+  rows.sort((a,b)=>ORDER[info.get(a).k]-ORDER[info.get(b).k]||num(a.SRP)-num(b.SRP));
+  /* readiness: what the calculator can build packages from */
+  const cat=catalogue();
+  const uniq=(arr)=>[...new Set(arr)].sort((a,b)=>a-b);
+  const pvW=uniq(cat.pv.map(x=>x.w)),invKW=uniq(cat.inv.map(x=>x.kw)),batK=uniq(cat.bat.map(x=>Math.round(x.kwh*100)/100));
+  const accHave=ACC_NEEDS.filter(([,re])=>cat.acc.some(s=>re.test(String(s["Specs / Description"])+" "+String(s.Brand||"")+" "+String(s.Rating||""))));
+  const accMiss=ACC_NEEDS.filter(x=>!accHave.includes(x));
+  const brands=list=>new Set(list.map(x=>bName(x))).size;
+  const tips=[];
+  if(!cat.pv.length)tips.push("Add at least one panel with its watts (e.g. 620W).");
+  if(!cat.inv.length)tips.push("Add hybrid inverters with their size (e.g. 6kW).");
+  if(cat.inv.length&&Math.min(...invKW)>5)tips.push(`Your smallest inverter is ${Math.min(...invKW)} kW, so small homes get oversized systems and fewer package choices. Add a 3–5 kW hybrid inverter.`);
+  if(cat.inv.length&&brands(cat.inv)<3)tips.push(`Only ${brands(cat.inv)} inverter brand${brands(cat.inv)>1?"s":""}: add another brand so packages can differ.`);
+  if(cat.bat.length&&batK.length<3)tips.push("Add more battery sizes (e.g. 5, 10 and 15 kWh) so each package can have a different night backup.");
+  if(!cat.bat.length)tips.push("Add 48V / 51.2V batteries with their kWh.");
+  if(accMiss.length)tips.push(`${accMiss.length} accessor${accMiss.length>1?"ies have":"y has"} no price yet: ${accMiss.slice(0,3).map(x=>x[0]).join(", ")}${accMiss.length>3?"…":""}.`);
+  const nNeeds=all.filter(needs).length;
+  const tile=(lbl,big,sub,cls,filt)=>`<button type="button" class="rtile ${cls||""}" ${filt?`data-filter="${k}" data-val="${esc(filt)}"`:""}><span class="l">${lbl}</span><b>${big}</b><span class="s">${esc(sub)}</span></button>`;
+  const ready=`<div class="rstrip">
+    ${tile("Panels",cat.pv.length,pvW.length?`${pvW[0]}–${pvW[pvW.length-1]} W · ${brands(cat.pv)} brands`:"none yet",cat.pv.length?"":"bad","PV Module")}
+    ${tile("Inverters",cat.inv.length,invKW.length?`${invKW.join(" · ")} kW · ${brands(cat.inv)} brands`:"none yet",cat.inv.length?"":"bad","Inverter")}
+    ${tile("Batteries",cat.bat.length,batK.length?`${batK.slice(0,5).join(" · ")}${batK.length>5?"…":""} kWh`:"none yet",cat.bat.length?"":"bad","Battery")}
+    ${tile("Accessories",`${accHave.length}/${ACC_NEEDS.length}`,accMiss.length?`priced · ${accMiss.length} missing`:"all priced",accMiss.length?"warn":"","Accessories")}
+    ${tile("Needs info",nNeeds,nNeeds?"tap to see and fix":"every item is readable",nNeeds?"warn":"ok","Needs info")}
+  </div>`;
+  const tipHTML=tips.length?`<div class="stips"><b>To get better packages</b><ul>${tips.slice(0,3).map(x=>`<li>${esc(x)}</li>`).join("")}</ul></div>`:"";
+  const opts=["PV Module","Inverter","Battery","Accessories","Needs info"];
+  const chips=`<div class="chips hscroll">${["All",...opts].map(o=>`<button type="button" class="chip${o==="Needs info"?" warnchip":""}" data-filter="${k}" data-val="${esc(o)}" aria-pressed="${f===o}">${esc(o)} <span>${o==="All"?bySup.length:bySup.filter(r=>o==="Needs info"?needs(r):KMAP[o]===info.get(r).k).length}</span></button>`).join("")}</div>`;
+  const supSel=`<label class="supsel"><span>Supplier</span><select class="form-select" data-supfilter aria-label="Supplier"><option value="">All suppliers · ${all.length}</option>${names.map(n=>`<option value="${esc(n)}" ${n===state.supplier?"selected":""}>${esc(n)} · ${all.filter(r=>String(r.Supplier||"").trim()===n).length}</option>`).join("")}</select></label>`;
+  const GL={pv:"Panels",inv:"Inverters",bat:"Batteries",acc:"Accessories"};let last="";
+  const list=rows.map(r=>{const g=info.get(r).k;const h=f==="All"&&g!==last?`<h3 class="sgh">${GL[g]}</h3>`:"";last=g;return h+supItemHTML(r)}).join("");
+  return `<div class="vw v-list v-${k}">`+header(name,state.supplier?`${bySup.length} items from ${esc(state.supplier)}`:`${all.length} items from ${names.length} suppliers · Your buying prices, read by the Solar Calculator`,`${supSel}<button class="btn btn-sol" type="button" data-new="${name}">${UI.plus}<span class="lbl">Add item</span></button>`)+
+  `${ready}${tipHTML}<div class="toolbar">${searchHTML(k,"Search brand, spec or supplier")}</div>${chips}
+   <div class="vscroll" data-keep="${k}"><div class="list grid2 slist2">${list||`<div class="empty">${all.length?"Nothing matches this search or filter.":"No supplier items yet. Tap Add item; it is saved to the Suppliers tab of your sheet."}</div>`}</div></div></div>`;
+}
+/* live preview in the supplier form: how the calculator will read this item */
+function supplierFormHelp(form){
+  const get=k=>{const el=form.querySelector(`[data-k="${k}"]`);return el?el.value:""};
+  const specEl=form.querySelector('[data-k="Specs / Description"]');if(!specEl||!form.querySelector('[data-k="SRP"]'))return;
+  const box=document.createElement("div");box.className="f full sdetect";(specEl.closest(".f")||specEl.parentElement).after(box);
+  const upd=()=>{const r={Item:get("Item"),Brand:get("Brand"),Rating:get("Rating"),"Specs / Description":get("Specs / Description"),SRP:get("SRP"),"Warranty (yrs)":get("Warranty (yrs)"),Active:get("Active")};
+    const I=itemInfo(r);box.className="f full sdetect st-"+I.st;box.innerHTML=`<b>Solar Calculator reads this as</b><span>${I.chips.length?I.chips.map(esc).join(" · ")+" · ":""}${esc(I.msg)}</span>`};
+  form.addEventListener("input",upd);form.addEventListener("change",upd);upd();
+  const rt=form.querySelector('[data-k="Rating"]');if(rt)rt.placeholder="620W · 6kW · 5.12kWh";
+}
+
+/* ---------- project cards and details ---------- */
+function projCard(p,split,on){
+  const cl=clientFor(p),pct=paidPct(p),bal=balanceOf(p),col=STAGE_COLOR[p.Status]||"#5E7590";
+  const name=(cl&&cl.Client)||p.Client||"No client";
+  const sys=[p["System (kWp)"]?p["System (kWp)"]+" kWp":"",p.Inverter,p.Battery].filter(Boolean).join(" · ");
+  const st=toISO(p["Start Date"]),t=today();
+  const when=p.Status==="Completed"?(toISO(p["Completion Date"])?"Done "+fmtDate(p["Completion Date"]).replace(/, \d{4}$/,""):"Completed"):st?(st>=t?`Install ${st===t?"today":"in "+daysBetween(t,st)+" d"}`:(p.Status==="Installing"||p.Status==="Awaiting loan release"?"Installed from ":"Install date was ")+fmtDate(st).replace(/, \d{4}$/,"")):"No install date";
+  const attr=split?`data-pick-proj="${p._row}"`:`data-edit="Projects" data-row="${p._row}"`;
+  return `<button type="button" class="pcard${on?" on":""}" ${attr} style="--c:${col}">
+    <span class="avatar" style="background:${col}">${esc(initials(name))}</span>
+    <span class="m"><b>${esc(name)}</b><span>${esc([cl?townOf(cl):"",sys].filter(Boolean).join(" · ")||"No system details yet")}</span>${stepsHTML(p.Status)}<em>${esc(shortStage(p.Status||"No stage"))} · ${esc(when)}</em></span>
+    <span class="r"><b>${shortPeso(num(p["Contract Price"]))}</b><span class="paybar"><i style="width:${pct}%" class="${pct>=100?"full":""}"></i></span><em class="${pct>=100?"g":bal?"y":""}">${pct>=100?"Paid":pct+"% · bal "+shortPeso(bal)}</em></span></button>`;
+}
+function projDetail(p){
+  const cl=clientFor(p),col=STAGE_COLOR[p.Status]||"#5E7590",name=(cl&&cl.Client)||p.Client||"No client";
+  const c=num(p["Contract Price"]),rcv=num(p["Amount Received"]),bal=balanceOf(p),pct=paidPct(p),cost=num(p["Job Cost"]);
+  const idx=PROJECT_STAGES.indexOf(p.Status),next=PROJECT_STAGES[idx+1]&&!(p.Payment!=="GSIS loan"&&PROJECT_STAGES[idx+1]==="Awaiting loan release")?PROJECT_STAGES[idx+1]:PROJECT_STAGES[idx+2];
+  const stages=PROJECT_STAGES.filter(s=>s!=="Awaiting loan release"||p.Payment==="GSIS loan"||p.Status===s);
+  const ci=stages.indexOf(p.Status);
+  const stepper=`<div class="pstepper">${stages.map((s,i)=>`<div class="ps ${i<ci?"done":i===ci?"cur":""}" style="--c:${STAGE_COLOR[s]}"><i>${i<ci?"✓":i+1}</i><span>${esc(shortStage(s))}</span></div>`).join("")}</div>`;
+  const pays=paymentLines(p);
+  const t=today(),ev=cl?allEvents().filter(e=>e.clientRef===cl):[];
+  const up=ev.filter(e=>e.iso>=t&&e.status!=="Cancelled").slice(0,3);
+  const dates=[["Contract",p["Contract Date"]],["Install",p["Start Date"]],["Completed",p["Completion Date"]]].map(([l,v])=>{const iso=toISO(v);return `<div class="pdt2${iso?"":" none"}"><span>${l}</span><b>${iso?esc(fmtDate(iso).replace(/, \d{4}$/,"")):"–"}</b><em>${iso?(iso>t?"in "+daysBetween(t,iso)+" days":iso===t?"today":daysBetween(iso,t)+" days ago"):""}</em></div>`}).join("");
+  const kv=(l,v)=>String(v??"").trim()?`<div><span>${l}</span><b>${esc(v)}</b></div>`:"";
+  const tel=cl?String(cl.Phone||"").replace(/[^\d+]/g,""):"";
+  return `<div class="pdh"><span class="avatar lg" style="background:${col}">${esc(initials(name))}</span><div class="pdn"><h2>${esc(name)}</h2><span>${esc([cl?townOf(cl):"",p.Payment,p.ID].filter(Boolean).join(" · "))}</span></div>
+      <div class="pdacts">${tel?`<a class="btn btn-line btn-sm" href="tel:${esc(tel)}">${UI.phone}<span class="lbl">Call</span></a>`:""}${cl?`<button type="button" class="btn btn-line btn-sm" data-client="${cl._row}">${ico("clients")}<span class="lbl">Client</span></button>`:""}<button type="button" class="btn btn-sol btn-sm" data-edit="Projects" data-row="${p._row}">${UI.edit}<span class="lbl">Edit</span></button></div></div>
+    ${stepper}
+    ${next&&p.Status!=="Completed"?`<button type="button" class="btn btn-line pnext" data-proj-next="${p._row}" data-to="${esc(next)}" style="--c:${STAGE_COLOR[next]}"><i></i>Move to ${esc(shortStage(next))}</button>`:""}
+    <div class="pdgrid2">
+      <section class="pbox pmoney"><h3>Payments</h3>
+        <div class="pring" style="--p:${pct};--c:${pct>=100?"var(--good)":"var(--sol)"}"><b>${pct}%</b><span>paid</span></div>
+        <div class="pnums">${kv("Contract",peso(c))}${kv("Received",peso(rcv))}<div class="${bal?"y":"g"}"><span>Balance</span><b>${bal?peso(bal):"Fully paid"}</b></div>${cost?`<div class="int"><span>Profit · internal</span><b>${peso(c-cost)} · ${c?Math.round((c-cost)/c*100):0}%</b></div>`:""}</div>
+        ${pays.length?`<div class="plog">${pays.slice(-4).reverse().map(x=>`<div><span>${esc(x.iso?fmtDate(x.iso).replace(/, \d{4}$/,""):"")}</span><b>${peso(x.amt)}</b></div>`).join("")}</div>`:`<p class="pnote">No payments logged yet. Tap Edit to add one.</p>`}</section>
+      <section class="pbox"><h3>System</h3><div class="pkv">${kv("Size",p["System (kWp)"]?p["System (kWp)"]+" kWp":"")}${kv("Panels",p.Panels)}${kv("Inverter",p.Inverter)}${kv("Battery",p.Battery)}</div>${!p["System (kWp)"]&&!p.Panels&&!p.Inverter?`<p class="pnote">Add the system details in Edit.</p>`:""}</section>
+      <section class="pbox"><h3>Dates</h3><div class="pdates">${dates}</div></section>
+      <section class="pbox"><h3>Coming up</h3>${up.length?`<div class="evlist">${up.map(e=>evButton(e)).join("")}</div>`:`<p class="pnote">Nothing scheduled.</p>`}<button type="button" class="btn btn-line btn-sm w-100" data-new="Calendar" data-proj-ev="${p._row}">+ Add event</button></section>
+      ${p.Notes?`<section class="pbox full"><h3>Notes</h3><p class="pnotes">${esc(p.Notes)}</p></section>`:""}
+    </div>`;
 }
 
 function hydrateThumbs(){
@@ -1169,7 +1391,7 @@ function openForm(name,rec,prefill){
     if(type==="time")return `<div class="f"><label for="${id}">${label}</label><input class="form-control" id="${id}" data-k="${esc(key)}" type="time" step="300" value="${esc(parseTime(raw))}"></div>`;
     if(type==="link"){
       const kind=opts;const href=kind==="fb"?fbURL(raw):mapURL(raw,r.Address);
-      return `<div class="f ${kind==="fb"?"full":""}"><label for="${id}">${label}</label><div class="linkin"><input class="form-control" id="${id}" data-k="${esc(key)}" type="text" ${kind==="fb"?'inputmode="url" autocapitalize="off" spellcheck="false"':'inputmode="decimal"'} value="${esc(raw)}" placeholder="${kind==="fb"?"facebook.com/username":"7.8255, 126.0485"}"><a class="lbtn ${kind}" data-link="${kind}" data-for="${id}" href="${esc(href||"#")}" target="_blank" rel="noopener" aria-label="${kind==="fb"?"Open Facebook profile":"Open in Google Maps"}" ${href?"":'aria-disabled="true"'}>${ICON_LINK[kind]}</a></div></div>`;
+      return `<div class="f ${kind==="fb"?"full":""}"><label for="${id}">${label}</label><div class="linkin ${kind}"><input class="form-control" id="${id}" data-k="${esc(key)}" type="text" ${kind==="fb"?'inputmode="url" autocapitalize="off" spellcheck="false"':'inputmode="text" autocapitalize="off" autocomplete="off" spellcheck="false" enterkeyhint="done"'} value="${esc(raw)}" placeholder="${kind==="fb"?"facebook.com/username":"7.8255, 126.0485 or paste a Google Maps link"}">${kind==="map"?`<button type="button" class="lbtn loc" data-locate="${id}" aria-label="Use this device's location" title="Use my current location">${GPS_ICON}</button>`:""}<a class="lbtn ${kind}" data-link="${kind}" data-for="${id}" href="${esc(href||"#")}" target="_blank" rel="noopener" aria-label="${kind==="fb"?"Open Facebook profile":"Open in Google Maps"}" ${href?"":'aria-disabled="true"'}>${ICON_LINK[kind]}</a></div></div>`;
     }
     if(type==="quoted")return `<div class="f"><label for="${id}">Quoted price <span class="hint">From packages</span></label><input class="form-control ro" id="${id}" type="text" readonly tabindex="-1" value=""></div>`;
     if(type==="packages")return `<div class="f full"><label>Packages quoted <span class="hint">Up to ${MAX_PACKAGES} · tap the circle on the package the client chose</span></label><div class="pkgs" id="pkgs"></div></div>`;
@@ -1220,6 +1442,12 @@ function openForm(name,rec,prefill){
   const proj=form.querySelector('[data-k="Project"]');
   if(proj&&pick)proj.addEventListener("change",()=>{const p=projectById(proj.value);const c=p&&clientFor(p);if(c&&!pick.value){pick.value=c["S.N."];showCard()}});
 
+  if(name==="Suppliers")supplierFormHelp(form);
+  /* GPS: tidy typed or pasted coordinates, and fill them from this device's location */
+  form.querySelectorAll("[data-locate]").forEach(b=>{const inp=document.getElementById(b.dataset.locate);
+    const tidy=()=>{const v=parseCoords(inp.value);if(v&&v!==inp.value){inp.value=v;inp.dispatchEvent(new Event("input",{bubbles:true}))}else if(/goo\.gl|maps\.app/i.test(inp.value))toast("Short map links can't be read here. In Google Maps, drop a pin and copy the numbers at the top.")};
+    inp.addEventListener("blur",tidy);inp.addEventListener("paste",()=>setTimeout(tidy,0));
+    b.addEventListener("click",()=>locateInto(inp,b))});
   /* rate per kWh = monthly bill ÷ monthly kWh, worked out as you type (2 decimals) */
   {const kw=form.querySelector('[data-k="kWh"]'),bl=form.querySelector('[data-k="Amount"]'),rt=form.querySelector('[data-k="Rate per kWh"]');
    if(kw&&bl&&rt){const upd=()=>{const k=num(kw.value),b=num(bl.value);if(k>0&&b>0)rt.value=(Math.round(b/k*100)/100).toFixed(2)};kw.addEventListener("input",upd);bl.addEventListener("input",upd);if(!String(rt.value).trim())upd();rt.placeholder="Bill ÷ kWh"}}
@@ -1366,7 +1594,8 @@ function openForm(name,rec,prefill){
 }
 
 /* ---------- calculator ---------- */
-const specOf=s=>String(s["Specs / Description"]||"")+" "+String(s.Brand||"");
+/* the Rating column (620W, 6kW, 5.12kWh) is read first, then Specs / Description and Brand */
+const specOf=s=>[s.Rating,s["Specs / Description"],s.Brand].map(x=>String(x||"")).join(" ");
 /* Sizes are read from the Brand and Specs / Description columns, in the ways suppliers usually write them */
 const kwOf=s=>{const t=specOf(s);let m=t.match(/(\d+(?:\.\d+)?)\s*kw(?!h)/i);if(m)return parseFloat(m[1]);
   m=t.match(/(\d+(?:\.\d+)?)\s*k(?![a-z])/i);if(m&&+m[1]<=30)return parseFloat(m[1]);
@@ -1407,15 +1636,16 @@ function loadCalc(){try{const s=JSON.parse(lsGet("solarays.calc2")||"null");if(s
 function loadPkgs(){try{const p=JSON.parse(lsGet(pkKey())||"[]");PKGS=Array.isArray(p)?p:[]}catch(e){PKGS=[]}}
 
 /* supplier catalogue */
-const warrantyOf=s=>{const m=String(s["Specs / Description"]||"").match(/(\d+)\s*-?\s*yr/i);return m?+m[1]:0};
+const warrantyOf=s=>{const w=num(s["Warranty (yrs)"]);if(w>0)return w;const m=String(s["Specs / Description"]||"").match(/(\d+)\s*-?\s*(?:yr|year)/i);return m?+m[1]:0};
+const isActive=s=>!/^(no|n|off|0)$/i.test(String(s.Active||"").trim());
 const supId=s=>"r"+s._row;
 /* Every priced row in your Suppliers tab, read fresh each time: add an item there and it shows here at once */
 let CAT_CACHE=null,CAT_KEY="";
 function catalogue(){
   const S=state.data.Suppliers;
-  const key=S.length+":"+S.map(s=>s._row+"|"+s.SRP+"|"+s.Item+"|"+s.Brand+"|"+s["Specs / Description"]+"|"+s.Supplier).join("~");
+  const key=S.length+":"+S.map(s=>s._row+"|"+s.SRP+"|"+s.Item+"|"+s.Brand+"|"+s["Specs / Description"]+"|"+s.Supplier+"|"+s.Rating+"|"+s["Warranty (yrs)"]+"|"+s.Active).join("~");
   if(CAT_CACHE&&key===CAT_KEY)return CAT_CACHE;
-  const priced=S.filter(s=>num(s.SRP)>0),skipped=[];
+  const priced=S.filter(s=>num(s.SRP)>0&&isActive(s)),skipped=[];
   const pv=[],inv=[],bat=[],acc=[];
   priced.forEach(s=>{const k=kindOfItem(s),b=brandOf(s);
     if(k==="pv"){const w=wOf(s);if(w>=150)pv.push({id:supId(s),s,w,price:num(s.SRP),wy:warrantyOf(s),label:`${b||s.Supplier||""} ${w}W`.trim()});else skipped.push([s,"panel watts (e.g. 580W)"])}
@@ -1427,32 +1657,50 @@ function catalogue(){
 const modelName=s=>{const sp=String(s["Specs / Description"]||"");const m=sp.match(/(?:Hybrid,\s*)?([A-Z][A-Za-z]+\s+[A-Z0-9][\w\-\/]+)/);return (s.Brand&&s.Brand!=="-"?s.Brand+" ":"")+sp.split(",").slice(0,2).join(",").replace(/^Hybrid,\s*/,"").replace(/^LiFePO4,?\s*/,"")};
 const optLabel=x=>`${x.label}${x.wy?" · "+x.wy+"-yr":""} · ${String(x.s["Specs / Description"]||"").split(",").slice(0,2).join(",").slice(0,38)} · ${peso(x.price)} · ${x.s.Supplier||"no supplier"}`;
 
+/* accessories the calculator prices from your Suppliers tab (same matching as the materials list) */
+const ACC_NEEDS=[["Mounting rail 2.4m",/rail(ing)?s?\b.*2\.4/i],["Rail connector",/rail connector/i],["Mid clamp",/mid clamp/i],["End clamp",/end clamp/i],["L-foot",/l-?foot/i],["Tile hook (tile roofs)",/tile hook/i],
+  ["Grounding lug",/grounding lug/i],["Grounding clip",/grounding clip/i],["PV cable 4mm² per meter",/pv cable.*4mm.*per meter/i],["PV cable 6mm² per meter",/pv cable.*6mm.*per meter/i],["DC combiner box 2-in",/combiner box,\s*2 in/i],
+  ["DC MCCB 160A",/MCCB.*160A/i],["DC MCCB 200A",/MCCB.*200A/i],["ATS 2P 63A",/ATS 2P 63A/i],["AC MCB 2P 63A",/AC MCB 2P.*,\s*63A/i],["AC SPD 2P",/AC SPD 2P/i],["Voltage protector",/voltage protector/i],
+  ["Distribution box HT-12",/HT-12/i],["Metal enclosure 50cm",/enclosure.*50cm/i],["Cable tray 5×10cm",/cable tray.*5cm\s*\*\s*10cm/i],["Fire aerosol 10g",/aerosol.*10 grams/i],["Fire aerosol 20g",/aerosol.*20 grams/i]];
 /* accessory price lookup: cheapest supplier row whose description matches */
-function accPick(acc,re){const m=acc.filter(s=>re.test(String(s["Specs / Description"])+" "+String(s.Brand||"")));return m.sort((a,b)=>num(a.SRP)-num(b.SRP))[0]||null}
+function accPick(acc,re){const m=acc.filter(s=>re.test(String(s["Specs / Description"])+" "+String(s.Brand||"")+" "+String(s.Rating||"")));return m.sort((a,b)=>num(a.SRP)-num(b.SRP))[0]||null}
 
 function calcRun(input){
   const c=input||C,cat=catalogue();
-  const rate0=num(c.rate);
-  const hist=(c.hist||[]).map(num).filter(v=>v>0);
-  let monthlyKWh=c.mode==="bill"?(rate0?num(c.bill)/rate0:0):c.mode==="history"?(hist.length?(c.histBasis==="max"?Math.max(...hist):hist.reduce((a,b)=>a+b,0)/hist.length):0):num(c.kwh);
-  const rate=rate0||(num(c.bill)&&num(c.kwh)?num(c.bill)/num(c.kwh):12);
-  if(c.mode==="bill"&&!rate0)monthlyKWh=num(c.bill)/rate;
-  const bill=num(c.bill)||monthlyKWh*rate;
-  const daily=monthlyKWh/30.42*(1+num(c.growth)/100);
+  /* usage and rate, by how the usage was entered:
+     kWh → kWh + rate you type (bill = kWh × rate) · Bill → bill + kWh from the same bill (rate = bill ÷ kWh) · 12 months → each month's kWh + rate */
+  const rate0=num(c.rate),hist=(c.hist||[]).map(num),histOK=hist.filter(v=>v>0);
+  let monthlyKWh=0,rate=rate0||12,rateAuto=false,bill=0,inputMissing="";
+  if(c.mode==="bill"){
+    const b=num(c.bill),k=num(c.kwh);bill=b;
+    if(b&&k){monthlyKWh=k;rate=b/k;rateAuto=true}
+    else if(b){monthlyKWh=b/rate;inputMissing="Type the kWh from the same bill so the rate is exact. Using ₱"+rate.toFixed(2)+"/kWh for now."}
+    else inputMissing="Type the monthly bill and the kWh shown on it.";
+  }else if(c.mode==="history"){
+    monthlyKWh=histOK.length?(c.histBasis==="max"?Math.max(...histOK):histOK.reduce((a,b)=>a+b,0)/histOK.length):0;bill=monthlyKWh*rate;
+    if(!histOK.length)inputMissing="Type the kWh for each month from the client's bills.";
+  }else{
+    monthlyKWh=num(c.kwh);bill=monthlyKWh*rate;
+    if(!monthlyKWh)inputMissing="Type the client's monthly kWh.";
+  }
+  const grow=1+num(c.growth)/100;
+  const daily=monthlyKWh/30.42*grow;
   const psh=num(c.psh)||4.5;
   const pr=(1-num(c.otherLoss)/100)*(SHADE[c.shade]||1)*(FACING[c.facing]||1);
   const yld=psh*pr;
-  const kwpNeed=yld?daily/yld:0;
+  const dsh=num(c.dayShare)/100;
+  const kwpNeed=yld?(daily*dsh+daily*(1-dsh)/0.95)/yld:0;
   /* panels */
   const cheapW=[...cat.pv].sort((a,b)=>a.price/a.w-b.price/b.w)[0];
   let pv=c.panel==="auto"?cheapW:c.panel==="auto-premium"?[...cat.pv].sort((a,b)=>b.wy-a.wy||b.w-a.w||a.price/a.w-b.price/b.w)[0]:cat.pv.find(x=>x.id===c.panel)||cheapW;
   const W=pv?pv.w:620;
-  const qty=num(c.panelQty)>0?Math.round(num(c.panelQty)):Math.max(1,Math.ceil(kwpNeed*1000/W));
+  const qty=num(c.panelQty)>0?Math.round(num(c.panelQty)):monthlyKWh?Math.max(2,Math.ceil(kwpNeed*1000/W)):0;
   const kwp=qty*W/1000;
   /* inverter: smallest that suits the panels (panels up to about 1.2× inverter) */
   const invFit=cat.inv.filter(x=>x.kw>=kwp*0.85).sort((a,b)=>a.kw-b.kw||a.price-b.price);
   let inv=c.inverter==="auto"?(invFit.length?invFit.filter(x=>x.kw===invFit[0].kw).sort((a,b)=>a.price-b.price)[0]:[...cat.inv].sort((a,b)=>b.kw-a.kw)[0]):cat.inv.find(x=>x.id===c.inverter);
   if(c.inverter==="auto-premium"){const pool=(invFit.length?invFit.filter(x=>x.kw===invFit[0].kw):cat.inv);inv=[...pool].sort((a,b)=>b.wy-a.wy||a.price-b.price)[0]}
+  if(!qty)inv=null;
   /* battery */
   const dayUse=daily*num(c.dayShare)/100,night=daily-dayUse;
   const usable=num(c.usable)/100||0.9;
@@ -1469,24 +1717,29 @@ function calcRun(input){
   const batKWh=bat?bat.kwh*batN:0;
   /* energy on an average day */
   const prodDay=kwp*yld;
-  const flow=p=>{const direct=Math.min(dayUse,p),surplus=p-direct,charge=Math.min(surplus,batKWh*usable,night/RTE),out=Math.min(charge*RTE,night);return {direct,charge,out,spare:surplus-charge,grid:Math.max(0,daily-direct-out)}};
+  const flow=(p,d)=>{d=d==null?daily:d;const du=d*num(c.dayShare)/100,ni=d-du;const direct=Math.min(du,p),surplus=p-direct,charge=Math.min(surplus,batKWh*usable,ni/RTE),out=Math.min(charge*RTE,ni);return {direct,charge,out,spare:surplus-charge,grid:Math.max(0,d-direct-out)}};
   const f=flow(prodDay);
   const offsetRaw=daily?(f.direct+f.out)/daily:0;
   const offset=Math.min(num(c.maxOffset)/100||0.95,offsetRaw);
   const prodM=SEASON.map((s,i)=>kwp*psh*s*pr*MDAYS[i]);
-  const useM=c.mode==="history"&&hist.length===12?(c.hist||[]).map(num):MDAYS.map(d=>daily*d);
-  const gridM=SEASON.map((s,i)=>flow(prodDay*s).grid*MDAYS[i]);
+  const hasHist=c.mode==="history"&&histOK.length===12;
+  const useM=hasHist?hist.map(v=>v*grow):MDAYS.map(d=>daily*d);
+  const dayM=useM.map((u,i)=>u/MDAYS[i]);
+  const gridM=SEASON.map((s,i)=>flow(prodDay*s,dayM[i]).grid*MDAYS[i]);
   /* savings month by month: the sun changes through the year, and energy you don't use is not paid for (no net metering) */
   const capM=num(c.maxOffset)/100||0.95;
-  const saveM=SEASON.map((s,i)=>{const use=daily*MDAYS[i],fromSolar=Math.max(0,use-gridM[i]);return Math.min(fromSolar,use*capM)*rate});
+  /* savings are on today's usage (planned extra usage only makes the system bigger) */
+  const saveM=SEASON.map((s,i)=>{const use=useM[i],fromSolar=Math.max(0,use-gridM[i]);return Math.min(fromSolar,use*capM)*rate/grow});
   const savings=saveM.reduce((a,b)=>a+b,0)/12;
-  const offsetYear=(()=>{const u=MDAYS.reduce((a,d)=>a+daily*d,0);return u?Math.min(capM,MDAYS.reduce((a,d,i)=>a+Math.max(0,daily*d-gridM[i]),0)/u):0})();
+  const offsetYear=(()=>{const u=useM.reduce((a,b)=>a+b,0);return u?Math.min(capM,useM.reduce((a,v,i)=>a+Math.max(0,v-gridM[i]),0)/u):0})();
+  /* night backup: hours of an average night (6pm–6am) the battery can run the home */
+  const nightKWh=night,nightHrs=nightKWh>0?Math.min(12,batKWh*usable*RTE/(nightKWh/12)):0;
   /* roof */
   const areaEach=W/220,areaNeed=qty*areaEach;
   /* materials */
   const L=[];
   const add=(cat_,item,s,qty_,unit,group)=>{if(qty_<=0)return;L.push({cat:cat_,group:group||cat_,item,supplier:s?s.Supplier:"",qty:qty_,unit:s?num(s.SRP):unit||0,missing:!s&&!unit})};
-  if(pv)L.push({cat:"PV Module",group:"Panels",item:`${pv.s.Brand&&pv.s.Brand!=="-"?pv.s.Brand+" ":""}${String(pv.s["Specs / Description"]).split(",").slice(0,2).join(",")}`,supplier:pv.s.Supplier,qty,unit:pv.price,ref:pv});
+  if(pv&&qty)L.push({cat:"PV Module",group:"Panels",item:`${pv.s.Brand&&pv.s.Brand!=="-"?pv.s.Brand+" ":""}${String(pv.s["Specs / Description"]).split(",").slice(0,2).join(",")}`,supplier:pv.s.Supplier,qty,unit:pv.price,ref:pv});
   if(inv)L.push({cat:"Inverter",group:"Inverter",item:String(inv.s["Specs / Description"]).replace(/^Hybrid,\s*/,"").split(",").slice(0,2).join(",")+" hybrid",supplier:inv.s.Supplier,qty:1,unit:inv.price,ref:inv});
   if(bat)L.push({cat:"Battery",group:"Battery",item:(brandOf(bat.s)&&!String(bat.s["Specs / Description"]).includes(brandOf(bat.s))?brandOf(bat.s)+" ":"")+String(bat.s["Specs / Description"]).replace(/^LiFePO4,?\s*/,"").split(",").filter(x=>!/cycles|IP\d/i.test(x)).join(",").trim()+" LiFePO4",supplier:bat.s.Supplier,qty:batN,unit:bat.price,ref:bat});
   const A=cat.acc,tile=/tile/i.test(c.roof);
@@ -1518,10 +1771,10 @@ function calcRun(input){
   const days=num(c.days)>0?num(c.days):kwp<=4?4:kwp<=8?5:kwp<=12?6:7;
   const crew=num(c.installers)+num(c.helpers)+1;
   const labor=(num(c.headRate)+num(c.installers)*num(c.instRate)+num(c.helpers)*num(c.helpRate))*days;
-  const trips=num(c.nights)>0?1:days;
+  const trips=Math.max(1,days-num(c.nights));
   const kmDriven=2*num(c.km)*trips*1.1;
-  const fuel=num(c.kmL)?kmDriven/num(c.kmL)*num(c.fuel):0,vehicle=kmDriven*num(c.vehKm);
-  const lodging=num(c.nights)*num(c.lodging),meals=num(c.nights)>0?crew*days*num(c.meals):0;
+  const fuel=num(c.kmL)?kmDriven/num(c.kmL)*num(c.fuel):0,vehicle=kmDriven*num(c.vehKm),km=kmDriven;
+  const lodging=num(c.nights)*num(c.lodging),meals=num(c.nights)>0?crew*Math.min(days,num(c.nights)+1)*num(c.meals):0;
   const mobCost=fuel+vehicle+lodging+meals;
   const mobFee=c.mobMode==="Charge client"?Math.ceil(mobCost/1000)*1000:0;
   const warrantyRes=material*num(c.warranty)/100;
@@ -1534,20 +1787,22 @@ function calcRun(input){
   /* savings */
   const esc=num(c.escalate)/100,age=num(c.aging)/100;
   const cum=[0];for(let y=0;y<25;y++)cum.push(cum[y]+savings*12*Math.pow(1+esc,y)*Math.pow(1-age,y));
+  const loan=c.payment==="GSIS loan"?Math.min(num(c.gsisLoan),contract):0,cashOut=contract-loan;
   /* payback from the yearly savings, including rate increases and panel aging */
   let payback=0;if(savings>0){for(let y=1;y<=25;y++){if(cum[y]>=contract){payback=y-1+(contract-cum[y-1])/(cum[y]-cum[y-1]);break}}if(!payback)payback=26}
   const lo=Math.min(...SEASON),hi=Math.max(...SEASON);
   const checks=[];
-  if(inv){const r=kwp/inv.kw;checks.push(r>1.3?["warn",`Panels (${kwp.toFixed(2)} kWp) are ${Math.round(r*100)}% of the ${inv.kw} kW inverter: some midday power will be clipped`]:r<0.7?["warn",`The ${inv.kw} kW inverter is larger than the ${kwp.toFixed(2)} kWp of panels needs`]:["ok",`Inverter ${inv.kw} kW suits ${kwp.toFixed(2)} kWp of panels (${Math.round(r*100)}%)`])}else checks.push(["bad","No inverter prices found in Suppliers"]);
+  if(inputMissing)checks.unshift(["bad",inputMissing]);
+  if(inv&&kwp){const r=kwp/inv.kw;checks.push(r>1.3?["warn",`Panels (${kwp.toFixed(2)} kWp) are ${Math.round(r*100)}% of the ${inv.kw} kW inverter: some midday power will be clipped`]:r<0.7?["warn",`The ${inv.kw} kW inverter is larger than the ${kwp.toFixed(2)} kWp of panels needs`]:["ok",`Inverter ${inv.kw} kW suits ${kwp.toFixed(2)} kWp of panels (${Math.round(r*100)}%)`])}else if(kwp)checks.push(["bad","No inverter prices found in Suppliers"]);
   if(needUsable>0){const cov=batKWh?Math.min(1,batKWh*usable*0.95/needUsable):0;checks.push(cov>=0.95?["ok",`Battery covers ${Math.round(cov*100)}% of the ${c.goal==="full"?"full-day":c.goal==="custom"?num(c.backupHrs)+"-hour":"night"} need (${batKWh.toFixed(2)} kWh, ${Math.round(usable*100)}% usable)`]:["warn",`Battery covers ${Math.round(cov*100)}% of the ${c.goal==="night"?"night":"backup"} need; add ${Math.max(0,need-batKWh).toFixed(1)} kWh for full coverage`])}
   const lowM=gridM.map((g,i)=>[g,i]).filter(x=>x[0]>daily*2).map(x=>MON[x[1]]);
-  checks.push(lowM.length?["warn",`Lower sun in ${lowM.slice(0,3).join(", ")}: about ${Math.round(Math.max(...gridM))} kWh/month from the grid then`]:["ok","Production covers usage in every month"]);
+  if(kwp)checks.push(lowM.length?["warn",`Lower sun in ${lowM.slice(0,3).join(", ")}: about ${Math.round(Math.max(...gridM))} kWh/month from the grid then`]:["ok","Production covers usage in every month"]);
   if(num(c.roofArea))checks.push(areaNeed<=num(c.roofArea)?["ok",`Fits the roof: ${Math.round(areaNeed)} m² of ${num(c.roofArea)} m²`]:["bad",`Needs ${Math.round(areaNeed)} m² but the roof has ${num(c.roofArea)} m²`]);
   const missing=L.filter(l=>l.missing).map(l=>l.item);
   if(missing.length)checks.push(["warn",`No supplier price for: ${missing.slice(0,2).join(", ")}${missing.length>2?"…":""}`]);
   const goalText=offset>=0.9?"90–100% (near-zero bill)":offset>=0.8?"80–90% savings":`${Math.floor(offset*20)*5}–${Math.floor(offset*20)*5+5}% savings`;
   if(cat.skipped&&cat.skipped.length)checks.push(["warn",`${cat.skipped.length} supplier item${cat.skipped.length>1?"s":""} can't be used yet: add ${cat.skipped[0][1]} to "${(brandOf(cat.skipped[0][0])+" "+String(cat.skipped[0][0]["Specs / Description"]||"")).trim().slice(0,40)}"${cat.skipped.length>1?" and others":""} in Suppliers`]);
-  return {c,cat,monthlyKWh,daily,rate,bill,psh,pr,yld,kwpNeed,pv,W,qty,kwp,inv,bat,batN,batKWh,dayUse,night,need,usable,prodDay,f,offset:offsetYear,offsetRaw,prodM,useM,gridM,savings,saveM,areaNeed,areaEach,
+  return {c,cat,monthlyKWh,daily,rate,rateAuto,bill,inputMissing,nightHrs,nightKWh,km,loan,cashOut,psh,pr,yld,kwpNeed,pv,W,qty,kwp,inv,bat,batN,batKWh,dayUse,night,need,usable,prodDay,f,offset:offsetYear,offsetRaw,prodM,useM,gridM,savings,saveM,areaNeed,areaEach,
     lines:L,material,days,crew,labor,fuel,vehicle,lodging,meals,mobCost,mobFee,warrantyRes,other,totalCost,price,contract,profit,margin,cum,payback,
     harvestLo:kwp*psh*pr*lo,harvestHi:kwp*psh*pr*hi,checks,goalText,annual:prodM.reduce((a,b)=>a+b,0),mult:material?price/material:0};
 }
@@ -1564,6 +1819,12 @@ const cfield=(k,label,opts={})=>{
 };
 const cseg=(k,label,items,span=2)=>`<div class="c2f" style="grid-column:span ${span}"><span>${label}</span><div class="c2seg" role="group" aria-label="${esc(label)}">${items.map(([v,l])=>`<button type="button" data-c2seg="${k}" data-v="${esc(v)}" aria-pressed="${String(C[k])===String(v)}">${esc(l)}</button>`).join("")}</div></div>`;
 const csec=t=>`<div class="c2sec">${t}</div>`;
+/* read-only results shown in the form (rate, estimated bill...) and updated as you type */
+const C2OUT={
+  rate:r=>r.rateAuto?r.rate.toFixed(2)+" ₱/kWh":"Enter bill and kWh",
+  bill:r=>r.monthlyKWh?peso(r.bill)+" / month":"–",
+  sized:r=>r.monthlyKWh?Math.round(r.daily*30.42).toLocaleString("en-PH")+" kWh / month"+(num(C.growth)?` (+${num(C.growth)}%)`:""):"–"};
+const cout=(k,label,r)=>`<div class="c2f"><span>${label}</span><span class="c2in ro"><input class="form-control" type="text" readonly tabindex="-1" data-c2out="${k}" value="${esc(C2OUT[k](r))}"></span></div>`;
 function activePkg(){if(C.view!=="pkg"||!PKGS.length)return -1;const a=Math.round(num(C.act));return a>=0&&a<PKGS.length?a:0}
 function tileTag(ai){
   if(ai>=0)return `<i class="ptag">Pkg ${ai+1}<span class="tn"> · ${esc(PKGS[ai].label)}</span></i>`;
@@ -1577,11 +1838,12 @@ function paintTiles(r){
 }
 function c2tiles(r,ai=-1){
   const t=(l,v,s,cls="",tc="xtra")=>`<div class="c2tile ${tc}"><span class="l">${l}</span><b class="${cls}">${v}</b><span class="s">${esc(s)}</span></div>`;
+  if(!r.qty)return `<div class="c2tile key c2empty"><span class="l">${tileTag(ai)}Start here</span><b>${esc(r.inputMissing||"Enter the client's usage")}</b><span class="s">Usage tab · kWh, bill or 12 months</span></div>`;
   const lo=Math.min(...r.saveM),hi=Math.max(...r.saveM);
   return t(ai>=0||PKGS.length?tileTag(ai)+(ai>=0?"":"PV system"):"PV system",r.kwp.toFixed(2)+" kWp",`${r.qty} × ${r.pv?r.pv.label:"—"}`,"","key")
     +t("Inverter",r.inv?r.inv.kw+" kW":"–",r.inv?`${r.inv.label} · ${Math.round(r.kwp/r.inv.kw*100)}% load`:"Add inverter prices")
-    +t("Battery",r.batKWh?(Math.round(r.batKWh*100)/100)+" kWh":"None",r.bat?`${r.batN} × ${r.bat.label}`:"No battery")
-    +t("Solar offset",Math.round(r.offset*100)+"%",Math.round(r.annual).toLocaleString("en-PH")+" kWh/yr")
+    +t("Battery",r.batKWh?(Math.round(r.batKWh*100)/100)+" kWh":"None",r.bat?`${r.batN} × ${r.bat.label} · ${nightText(r)}`:"No night backup")
+    +t("Bill reduced",Math.round(r.offset*100)+"%",Math.round(r.annual).toLocaleString("en-PH")+" kWh/yr from solar")
     +t("Savings · avg",shortPeso(r.savings)+"/mo",`Bill ${shortPeso(r.bill)} → ${shortPeso(Math.max(0,r.bill-r.savings))} · ${shortPeso(lo)}–${shortPeso(hi)}`,"g","key")
     +t("Payback",r.payback>25?"25+ yrs":r.payback?r.payback.toFixed(1)+" yrs":"–",`10-yr savings ${shortPeso(r.cum[10])}`)
     +t("Selling price",peso(r.contract),`${Math.round(r.margin*100)}% margin · ${r.mult.toFixed(2)}× material`,"","key hero");
@@ -1594,11 +1856,15 @@ function c2left(r){
     if(C.lt==="usage"){
       body=cseg("mode","Enter usage by",[["kwh","kWh"],["bill","Bill"],["history","12 months"]])
        +(C.mode==="history"?`<div class="c2f" style="grid-column:span 2"><span>Monthly kWh, Jan to Dec <span class="c2h">${C.histBasis==="max"?"sized for highest month":"sized for the average"}</span></span><div class="c2hist">${MON.map((m,i)=>`<label><em>${m}</em><input type="text" inputmode="decimal" data-c2h="${i}" value="${esc(C.hist[i]||"")}" aria-label="${m} kWh"></label>`).join("")}</div></div>`+cseg("histBasis","Size for",[["avg","Average month"],["max","Highest month"]])
-         :cfield("kwh","Monthly kWh",{unit:"kWh",hint:C.mode==="bill"?"from bill ÷ rate":""})+cfield("bill","Monthly bill",{unit:"₱"}))
-       +cfield("utility","Utility",{text:true,ph:"NORDECO"})+cfield("rate","Rate",{unit:"₱/kWh",ph:r.rate.toFixed(2),hint:num(C.rate)?"":"auto: bill ÷ kWh"})
+          +cfield("rate","Rate",{unit:"₱/kWh",ph:"12.00",hint:"from a recent bill"})+cout("bill","Estimated bill",r)
+         :C.mode==="bill"?cfield("bill","Monthly bill",{unit:"₱",hint:"amount due"})+cfield("kwh","Monthly kWh",{unit:"kWh",hint:"on the same bill",ph:"e.g. 757"})+cout("rate","Rate · auto",r)
+         :cfield("kwh","Monthly kWh",{unit:"kWh",ph:"e.g. 500"})+cfield("rate","Rate",{unit:"₱/kWh",ph:"12.00",hint:"from a recent bill"})+cout("bill","Estimated bill",r))
+       +cfield("utility","Utility",{text:true,ph:"NORDECO"})+cout("sized","Sized for",r)
+       +`<div class="c2warn" style="grid-column:span 2" ${r.inputMissing?"":"hidden"}>${esc(r.inputMissing||"")}</div>`
        +`<div class="c2f" style="grid-column:span 2"><span>When power is used <span class="c2h">day ${C.dayShare}% · night ${100-C.dayShare}%</span></span><div class="c2day" style="--d:${C.dayShare}%"><input type="range" min="0" max="100" step="5" value="${C.dayShare}" data-c2="dayShare" aria-label="Share of power used in daytime"><span class="dl">Day ${C.dayShare}%</span><span class="nl">Night ${100-C.dayShare}%</span></div></div>`
        +cfield("goal","Battery goal",{select:[["night","Cover night use"],["full","Full-day backup"],["custom","Custom backup hours"]]})
-       +(C.goal==="custom"?cfield("backupHrs","Backup hours",{unit:"hrs"}):cfield("growth","Future load growth",{unit:"%",hint:"new aircon etc."}));
+       +(C.goal==="custom"?cfield("backupHrs","Backup hours",{unit:"hrs"}):"")+cfield("growth","Planned extra usage",{unit:"%",hint:"e.g. 20 if adding an aircon",ph:"0"})
+       +`<div class="c2note" style="grid-column:span 2">Planned extra usage sizes the system bigger for appliances the client will add soon (a new aircon, freezer, etc.). Leave it at 0 if nothing is planned. Savings are still worked out on today's bill.</div>`;
     }else if(C.lt==="site"){
       body=csec("Sun and roof")+cfield("sunPreset","Location",{select:SUN_PRESETS.map(p=>[p[0],p[1]?`${p[0]} · ${p[1]} sun hrs`:"Custom"])})+cfield("psh","Peak sun hours",{unit:"hrs/day"})
        +cfield("roof","Roof type",{select:ROOFS})+cfield("facing","Roof facing",{select:Object.keys(FACING)})
@@ -1620,26 +1886,27 @@ function c2left(r){
   if(C.ct==="labor"){
     body=csec("Crew")+cfield("installers","Installers",{unit:"pax"})+cfield("instRate","Installer rate",{unit:"₱/day"})
      +cfield("helpers","Helpers",{unit:"pax"})+cfield("helpRate","Helper rate",{unit:"₱/day"})
-     +cfield("headRate","Installer head rate",{unit:"₱/day"})+cfield("days","Job days",{ph:`auto: ${r.days}`,unit:"days"})
-     +`<div class="c2note" style="grid-column:span 2">Labor: ${peso(r.labor)} for ${r.days} days (${peso(r.days?r.labor/r.days:0)} per day). Job days are worked out from the system size unless you type a number.</div>`;
+     +cfield("headRate","Team lead rate",{unit:"₱/day",hint:"0 if you lead"})+cfield("days","Job days",{ph:`auto: ${r.days}`,unit:"days"})
+     +`<div class="c2note" style="grid-column:span 2">Labor ${peso(r.labor)} = (${peso(num(C.headRate))} lead + ${num(C.installers)} × ${peso(num(C.instRate))} + ${num(C.helpers)} × ${peso(num(C.helpRate))}) × ${r.days} days. Crew of ${r.crew} including the lead. Job days come from the system size unless you type a number.</div>`;
   }else if(C.ct==="travel"){
     body=csec("Mobilization")+cfield("km","Distance, one way",{unit:"km"})+cfield("nights","Overnight stays",{unit:"nights"})
      +cfield("fuel","Diesel",{unit:"₱/L"})+cfield("kmL","Vehicle mileage",{unit:"km/L"})
-     +cfield("lodging","Lodging",{unit:"₱/night"})+cfield("meals","Meals (overnight jobs)",{unit:"₱/pax/day"})
+     +cfield("vehKm","Vehicle wear",{unit:"₱/km",hint:"tires, oil, upkeep"})+cfield("lodging","Lodging, whole crew",{unit:"₱/night"})+cfield("meals","Meals on overnight jobs",{unit:"₱/pax/day"})
      +cseg("mobMode","Mobilization fee",[["Free","Free (absorbed)"],["Charge client","Charge client"]])
-     +`<div class="c2note" style="grid-column:span 2">Trip cost ${peso(r.mobCost)}${r.mobFee?` · client pays ${peso(r.mobFee)} (rounded up to ₱1,000)`:" · absorbed in the package price"}.</div>`;
+     +`<div class="c2note" style="grid-column:span 2">Trip cost ${peso(r.mobCost)}: ${Math.round(r.km)} km driven (${Math.max(1,r.days-num(C.nights))} round trip${Math.max(1,r.days-num(C.nights))>1?"s":""}, +10% for errands) · diesel ${peso(r.fuel)} · wear ${peso(r.vehicle)}${r.lodging?` · lodging ${peso(r.lodging)}`:""}${r.meals?` · meals ${peso(r.meals)}`:""}${r.mobFee?` · client pays ${peso(r.mobFee)} (rounded up to ₱1,000)`:" · absorbed in the package price"}.</div>`;
   }else if(C.ct==="pricing"){
     const pv={mult:["mult","Material ×",""],margin:["margin","Target margin","%"],profit:["profit","Profit amount","₱"],manual:["manual","Package price","₱"]}[C.priceBy];
     body=cseg("priceBy","Price by",[["mult","Multiplier"],["margin","Margin"],["profit","Profit"],["manual","Manual"]])
      +cfield(pv[0],pv[1],{unit:pv[2]})+cfield("round","Round up to",{select:[["100","₱100"],["1000","₱1,000"],["5000","₱5,000"]]})
      +cfield("smallParts","Small parts allowance",{unit:"₱",hint:"AC wire, conduit, MC4, ground rod"})+cfield("misc","Permits & misc",{unit:"₱"})
      +cfield("warranty","Warranty reserve",{unit:"% of material"})+cfield("payment","Payment",{select:["Cash","GSIS loan"]})
-     +(C.payment==="GSIS loan"?cfield("gsisLoan","Client's tentative GSIS loan",{unit:"₱",span:2}):"");
+     +(C.payment==="GSIS loan"?cfield("gsisLoan","Client's tentative GSIS loan",{unit:"₱",span:2}):"")
+     +`<div class="c2note" style="grid-column:span 2">${{mult:`Price = materials ${peso(r.material)} × ${num(C.mult)} (labor, travel and allowances come out of this)`,margin:`Price = job cost ${peso(r.totalCost-(r.mobFee?r.mobCost:0))} ÷ (1 − ${num(C.margin)}%)`,profit:`Price = job cost ${peso(r.totalCost-(r.mobFee?r.mobCost:0))} + ${peso(num(C.profit))} profit`,manual:"Price is what you type"}[C.priceBy]}, rounded up → ${peso(r.price)}. Profit ${peso(r.profit)} (${Math.round(r.margin*100)}% of the contract).${r.loan?` GSIS loan ${peso(r.loan)} · client cash-out ${peso(r.cashOut)}.`:""}</div>`;
   }else{
     body=csec("Savings assumptions")+cfield("escalate","Electric rate increase",{unit:"%/yr",hint:"0 = today's rate"})+cfield("aging","Panel aging",{unit:"%/yr"})
      +cfield("maxOffset","Max bill offset",{unit:"%",hint:"fixed charges, cloudy days"})
-     +`<div class="c2f"><span>Bill after solar</span><span class="c2in ro"><input type="text" readonly tabindex="-1" value="${esc(peso(r.bill-r.savings))} / month"></span></div>`
-     +`<div class="c2note" style="grid-column:span 2">Quotation figures use the same numbers: harvest ${r.harvestLo.toFixed(0)}–${r.harvestHi.toFixed(0)} kWh/day, savings ${peso(r.savings)}/month, payback ${r.payback.toFixed(1)} years, 10-year savings ${peso(r.cum[10])}.</div>`;
+     +`<div class="c2f"><span>Bill after solar</span><span class="c2in ro"><input class="form-control" type="text" readonly tabindex="-1" value="${esc(peso(Math.max(0,r.bill-r.savings)))} / month"></span></div>`
+     +`<div class="c2note" style="grid-column:span 2">Quotation figures use the same numbers: harvest ${r.harvestLo.toFixed(0)}–${r.harvestHi.toFixed(0)} kWh/day, savings ${peso(r.savings)}/month, payback ${r.payback>25?"over 25":r.payback.toFixed(1)} years, 10-year savings ${peso(r.cum[10])}.</div>`;
   }
   return `<section class="card c2left inputs"><div class="c2tabs" role="tablist">${tabs.map(([k,l])=>`<button type="button" role="tab" data-c2ct="${k}" aria-selected="${C.ct===k}">${l}</button>`).join("")}</div><div class="c2form">${body}</div></section>`;
 }
@@ -1692,18 +1959,19 @@ function c2packages(){
     const bq=c.batQty!==""&&c.batQty!=null?c.batQty:"";
     return `<section class="pkcard ${p.sel===false?"off":""} ${i===act?"act":""}" style="--c:${col}" data-pkpick="${i}" aria-current="${i===act}">
       <div class="pkh"><span class="pkno">${i+1}</span><input class="pkname" data-pkname="${i}" value="${esc(p.label)}" aria-label="Package ${i+1} name"><button type="button" class="pksel" data-pksel="${i}" aria-pressed="${p.sel!==false}" aria-label="Include in quotation"></button></div>
+      <div class="pkchips"><span>Bill −${Math.round(r.offset*100)}%</span><span>${r.batKWh?Math.round(r.nightHrs)+"h night":"no battery"}</span><span class="g">${shortPeso(r.savings)}/mo</span><span>${r.payback>25?"25+":r.payback.toFixed(1)} yr payback</span></div>
       <div class="pkbody">
         <label class="pkf"><span>Panels <em>${r.qty} pcs · ${r.kwp.toFixed(2)} kWp</em></span><select class="form-select" data-pkf="${i}:panel">${opt(cat.pv,c.panel||"auto",[["auto","Auto · lowest ₱ per watt"],["auto-premium","Auto · longest warranty"]])}</select></label>
         <label class="pkf"><span>Inverter <em>${r.inv?r.inv.kw+" kW · "+Math.round(r.kwp/r.inv.kw*100)+"% load":"none fits"}</em></span><select class="form-select" data-pkf="${i}:inverter">${opt(cat.inv,c.inverter||"auto",[["auto","Auto · lowest price that fits"],["auto-premium","Auto · longest warranty that fits"]])}</select></label>
-        <div class="pkf2"><label class="pkf"><span>Battery <em>${r.batKWh?(Math.round(r.batKWh*100)/100)+" kWh":"none"}</em></span><select class="form-select" data-pkf="${i}:battery">${opt(cat.bat,c.battery||"auto",[["auto","Auto · lowest total cost"],["auto-premium","Auto · longest warranty"]])}</select></label>
-        <label class="pkf qty"><span>Qty</span><select class="form-select" data-pkf="${i}:batQty"><option value="" ${bq===""?"selected":""}>×${r.batN||0} auto</option>${[1,2,3,4,5,6].map(n=>`<option value="${n}" ${String(bq)===String(n)?"selected":""}>×${n}</option>`).join("")}</select></label></div>
+        <div class="pkf2"><label class="pkf"><span>Battery <em>${r.batKWh?(Math.round(r.batKWh*100)/100)+" kWh":"none"}</em></span><select class="form-select" data-pkf="${i}:battery">${opt(cat.bat,c.battery||"auto",[["auto","Auto · lowest total cost"],["auto-premium","Auto · longest warranty"],["none","No battery (add later)"]])}</select></label>
+        <label class="pkf qty"><span>Qty</span><select class="form-select" data-pkf="${i}:batQty" ${c.battery==="none"?"disabled":""}><option value="" ${bq===""?"selected":""}>×${r.batN||0} auto</option>${[1,2,3,4,5,6].map(n=>`<option value="${n}" ${String(bq)===String(n)?"selected":""}>×${n}</option>`).join("")}</select></label></div>
         <div class="pkstats">${[["Offset",Math.round(r.offset*100)+"%"],["Savings",shortPeso(r.savings)+"/mo"],["Payback",r.payback>25?"25+ yrs":r.payback.toFixed(1)+" yrs"],["Margin",Math.round(r.margin*100)+"%"]].map(([a,b])=>`<div><span>${a}</span><b>${b}</b></div>`).join("")}</div>
       </div>
       <div class="pkfoot"><div class="pkprice"><span>${r.mobFee?"Total contract price":"Selling price"}</span><b>${peso(r.contract)}</b></div>
         <div class="pkact"><button type="button" class="btn btn-sol btn-sm" data-pkinfo="${i}" title="Savings, components, ROI and more">Details</button><button type="button" class="btn btn-line btn-sm btn-ic" data-pkedit="${i}" title="Open in Sizing to change more" aria-label="Edit in Sizing">${UI.edit}</button><button type="button" class="btn btn-line btn-sm btn-ic" data-pkrm="${i}" aria-label="Remove package">×</button></div></div>
     </section>`};
   const dupes=new Set();const keys=runs.map(x=>pkgKey(x.r));keys.forEach((k,i)=>{if(keys.indexOf(k)!==i)dupes.add(i)});
-  const cards=runs.map(card).join("")+(PKGS.length<6?`<button type="button" class="pkadd" data-c2act="pkadd"><b>+</b><span>Add current setup</span><em>${PKGS.length} of 6</em></button>`:"");
+  const cards=runs.map(card).join("")+(PKGS.length<6?`<button type="button" class="pkadd" data-c2act="pkadd"><b>+</b><span>Add package</span><em>${PKGS.length} of 6</em></button>`:"");
   const empty=!PKGS.length?`<div class="pkempty"><b>No packages yet</b><span>Let the calculator suggest packages from everything in your Suppliers tab, or set up a system in Sizing and tap Add current setup.</span><div class="hrow"><label class="sugn"><select class="form-select" data-sugn aria-label="How many packages">${[3,4,5,6].map(n=>`<option ${n===6?"selected":""}>${n}</option>`).join("")}</select></label><button type="button" class="btn btn-sol" data-c2act="suggest">Suggest packages</button></div></div>`:"";
   const sel=runs.filter(x=>x.p.sel!==false);
   const cnt=6;
@@ -1730,6 +1998,8 @@ function calcView(){
 }
 function calcRefresh(){
   const r=calcRun();paintTiles(r);
+  document.querySelectorAll("[data-c2out]").forEach(el=>{const f=C2OUT[el.dataset.c2out];if(f)el.value=f(r)});
+  {const w=document.querySelector(".c2warn");if(w)w.textContent=r.inputMissing||"";if(w)w.hidden=!r.inputMissing}
   const rr=$("#c2r");if(rr){CHARTS={};chartSeq=0;rr.innerHTML=c2right(r);requestAnimationFrame(()=>drawCharts(false))}
   saveCalc();
 }
@@ -1738,57 +2008,95 @@ function bindCalc(){requestAnimationFrame(()=>drawCharts(true))}
 function applyClient(no){
   saveCalc();C.client=no;loadPkgs();
   const c=clientByNo(no);
-  if(c){if(num(c.kWh)){C.kwh=num(c.kWh);C.mode="kwh"}if(num(c.Amount))C.bill=Math.round(num(c.Amount)*100)/100;if(num(c["Rate per kWh"]))C.rate=num(c["Rate per kWh"]);if(c.DU)C.utility=c.DU}
+  if(c){const k=num(c.kWh),b=num(c.Amount),rt=num(c["Rate per kWh"]);
+    if(k)C.kwh=k;if(b)C.bill=Math.round(b*100)/100;if(rt)C.rate=rt;else if(k&&b)C.rate=Math.round(b/k*100)/100;
+    C.mode=k&&b?"bill":k?"kwh":b?"bill":C.mode;if(c.DU)C.utility=c.DU}
   saveCalc();
 }
-/* Packages: up to 6, each built from different brands of panels, inverter and battery where your supplier list has them.
-   They are always listed from the highest selling price (Package 1) to the lowest. */
+/* Packages: up to 6, listed from the highest selling price (Package 1) to the lowest.
+   Each package is a different level of coverage, so savings, bill after solar, night backup and payback differ:
+   Premium covers the whole bill and every night, Value is a starter system. Each one also uses different brands
+   of panels, inverter and battery where your Suppliers tab has them. */
 const TIER_NAMES={1:["Standard"],2:["Premium","Value"],3:["Premium","Standard","Value"],4:["Premium","Plus","Standard","Value"],5:["Premium","Plus","Standard","Basic","Value"],6:["Premium","Plus","Standard","Smart","Basic","Value"]};
 const ALL_TIER=new Set(["Premium","Plus","Standard","Smart","Basic","Value","Starter","Option 6","Solar Package"]);
+/* solar size and battery size as a share of what fully covers the client */
+const TIERS=[{pv:1.00,bat:1.00,q:1},{pv:0.88,bat:0.85,q:0.6},{pv:0.77,bat:0.65,q:0.3},{pv:0.66,bat:0.45,q:0.1},{pv:0.56,bat:0.30,q:0},{pv:0.46,bat:0,q:0}];
 function pkgKey(r){return [r.pv&&r.pv.id,r.qty,r.inv&&r.inv.id,r.bat&&r.bat.id,r.batN].join("|")}
 const bName=x=>x?(brandOf(x.s)||String(x.s.Supplier||"")).toLowerCase():"";
-function pkgBase(){return {goal:C.goal,backupHrs:C.backupHrs,priceBy:C.priceBy,mult:C.mult,margin:C.margin,profit:C.profit,manual:"",panelQty:""}}
-/* every sensible combination from the Suppliers tab, with the inverter sized to the panels (80–130% load) */
-function packageCandidates(){
-  const cat=catalogue(),base=pkgBase();
-  const ref=calcRun({...C,...base,panel:"auto",inverter:"auto",battery:"auto",batQty:""});
-  if(!ref.pv||!cat.inv.length)return [];
-  const pvs=[...cat.pv].sort((a,b)=>a.price/a.w-b.price/b.w).slice(0,8);
-  const kwp=ref.kwp,invs=cat.inv.filter(x=>x.kw>=kwp*0.7&&x.kw<=kwp*1.35);
-  const need=ref.need||0,bats=[];
-  cat.bat.forEach(b=>{const full=Math.max(1,Math.ceil(need/b.kwh-0.02));if(full<=6)bats.push({id:b.id,n:full});if(full>1&&b.kwh*(full-1)>=need*0.6)bats.push({id:b.id,n:full-1})});
-  const out=[],seen=new Set();
-  pvs.forEach(pv=>(invs.length?invs:[ref.inv]).forEach(inv=>(bats.length?bats:[{id:"none",n:""}]).forEach(bo=>{
-    const cfg={...base,panel:pv.id,inverter:inv.id,battery:bo.id,batQty:bo.n};let r=calcRun({...C,...cfg});
-    if(!r.inv||!r.pv)return;
-    if(r.kwp/r.inv.kw<0.8){const q=Math.ceil(0.8*r.inv.kw*1000/r.W);if(q-r.qty>3)return;cfg.panelQty=q;r=calcRun({...C,...cfg})}
-    const ratio=r.kwp/r.inv.kw;if(ratio<0.8||ratio>1.3)return;
-    const key=pkgKey(r);if(seen.has(key))return;seen.add(key);
-    const cover=r.need?Math.min(1,r.batKWh/r.need):0;
-    out.push({cfg,r,key,price:r.contract,pb:bName(r.pv),ib:bName(r.inv),bb:bName(r.bat),inv:r.inv.id,bat:r.bat?r.bat.id:"",
-      quality:(r.pv.wy||0)*0.6+(r.inv.wy||0)+(r.bat?r.bat.wy||0:0)+cover*8});
-  })));
+function pkgBase(){return {goal:C.goal,backupHrs:C.backupHrs,priceBy:C.priceBy,mult:C.mult,margin:C.margin,profit:C.profit,manual:""}}
+/* candidate systems for one coverage level */
+function tierCandidates(t,ref,cat,base){
+  const kwpT=ref.kwpNeed*t.pv,batT=ref.need*t.bat;
+  const byW=[...cat.pv].sort((a,b)=>a.price/a.w-b.price/b.w),byWy=[...cat.pv].sort((a,b)=>b.wy-a.wy||a.price/a.w-b.price/b.w);
+  const pvs=[...new Set([...byW.slice(0,7),...byWy.slice(0,3)])];
+  const out=[];
+  pvs.forEach(pv=>{
+    const q0=Math.max(2,Math.round(kwpT*1000/pv.w));
+    cat.inv.forEach(inv=>{
+      let q=q0,kwp=q*pv.w/1000,ratio=kwp/inv.kw;
+      if(ratio<0.8){q=Math.ceil(0.8*inv.kw*1000/pv.w)}
+      else if(ratio>1.3){const q2=Math.floor(1.3*inv.kw*1000/pv.w);if(q-q2>2)return;q=q2}
+      kwp=q*pv.w/1000;ratio=kwp/inv.kw;if(ratio<0.8||ratio>1.3||q<2)return;
+      const bats=batT>0?cat.bat.flatMap(b=>[...new Set([Math.floor(batT/b.kwh),Math.ceil(batT/b.kwh)])].map(n=>Math.min(6,Math.max(1,n))).filter((n,i,a)=>a.indexOf(n)===i).map(n=>({b,n,kwh:b.kwh*n}))).filter(o=>o.kwh>=batT*0.55&&o.kwh<=batT*1.45||cat.bat.length<3):[];
+      (bats.length?bats:[null]).forEach(o=>out.push({pv,inv,q,bo:o,kwp,batKWh:o?o.kwh:0,
+        cfg:{...base,panel:pv.id,panelQty:q,inverter:inv.id,battery:o?o.b.id:"none",batQty:o?o.n:""}}));
+    });
+  });
+  /* rough price to keep only the closest fits, then run the full calculator on those */
+  out.forEach(c=>{c.fit=Math.abs(c.kwp-kwpT)/Math.max(0.5,kwpT)+(batT?Math.abs(c.batKWh-batT)/batT:0);
+    c.rough=c.pv.price*c.q+c.inv.price+(c.bo?c.bo.b.price*c.bo.n:0);
+    c.quality=(c.pv.wy||0)*0.6+(c.inv.wy||0)+(c.bo?c.bo.b.wy||0:0)});
+  /* keep the closest fits of each battery size and solar size, so smaller and bigger options both stay in the running */
+  const groups={};out.sort((a,b)=>a.fit-b.fit||a.rough-b.rough).forEach(c=>{const g=Math.round(c.batKWh)+"|"+Math.round(c.kwp*2);(groups[g]=groups[g]||[]).push(c)});
+  const keep=Object.values(groups).flatMap(g=>g.slice(0,10)).sort((a,b)=>a.fit-b.fit).slice(0,140);
+  return keep.map(c=>{const r=calcRun({...C,...c.cfg});return {...c,r,key:pkgKey(r),price:r.contract,pb:bName(r.pv),ib:bName(r.inv),bb:bName(r.bat),inv:c.inv.id,bat:c.bo?c.bo.b.id:""}}).filter(c=>c.r.inv&&c.r.pv);
+}
+/* how much of the client's need a package covers: bill reduction counts most, night backup next */
+const covOf=r=>0.65*r.offset+0.35*Math.min(1,(r.nightHrs||0)/12);
+/* every candidate system across all coverage levels, solar never sized above what the client needs */
+function allCandidates(ref,cat,base){
+  const minInv=Math.min(...cat.inv.map(x=>x.kw)),cap=Math.max(ref.kwpNeed*1.08+0.35,minInv*0.8+0.7);
+  const seen=new Set(),out=[];
+  TIERS.forEach(t=>tierCandidates(t,ref,cat,base).forEach(c=>{if(c.kwp>cap||c.batKWh>ref.need*1.25+0.5||seen.has(c.key))return;seen.add(c.key);c.cov=covOf(c.r);c.eff=c.r.savings>0?c.price/(c.r.savings*12):99;out.push(c)}));
   return out;
 }
-/* choose n packages spread from high to low price, avoiding brands already used */
-function pickDiverse(cands,n,existing){
-  const chosen=(existing||[]).slice(),out=[];if(!cands.length)return out;
-  const sorted=[...cands].sort((a,b)=>b.price-a.price),hi=sorted[0].price,lo=sorted[sorted.length-1].price,span=Math.max(1,hi-lo);
-  const todo=n;
-  for(let k=0;k<todo;k++){
-    const target=todo===1?(lo+hi)/2:hi-span*k/(todo-1);
+/* choose packages spread evenly from the most coverage (Premium) to the least (Value):
+   each one clearly different in bill reduction or night backup, with different brands where possible,
+   the better-warranty parts on top and the best value for money on the lower levels */
+function pickLadder(cands,n,chosen){
+  chosen=(chosen||[]).slice();const out=[];if(!cands.length)return out;
+  const covs=cands.map(c=>c.cov),hi=Math.max(...covs),lo=Math.min(...covs),span=Math.max(0.05,hi-lo);
+  const gap=Math.min(0.05,span/(n*1.7));
+  const effs=cands.map(c=>c.eff),eLo=Math.min(...effs),eSpan=Math.max(0.1,Math.max(...effs)-eLo);
+  const targets=n===1?[(hi+lo)/2]:Array.from({length:n},(_,k)=>hi-span*k/(n-1));
+  /* if packages already exist (+ Add), aim for the biggest gap between them */
+  if(chosen.length&&n===1){let best=hi,bd=-1;for(let k=0;k<=20;k++){const tc=hi-span*k/20,d=Math.min(...chosen.map(x=>Math.abs((x.cov!=null?x.cov:covOf(x.r))-tc)));if(d>bd){bd=d;best=tc}}targets[0]=best}
+  targets.forEach((tc,k)=>{
+    const q=n===1?0.3:Math.max(0,1-k/Math.max(1,(n-1)*0.5)); /* warranty matters most on the top packages */
     let best=null,bs=Infinity;
-    for(const c of sorted){
+    for(const c of cands){
       if(chosen.some(x=>x.key===c.key))continue;
-      let ov=0;chosen.forEach(x=>{if(x.ib&&x.ib===c.ib)ov+=3;if(x.bb&&x.bb===c.bb)ov+=3;if(x.pb&&x.pb===c.pb)ov+=1;if(x.inv===c.inv)ov+=2;if(x.bat===c.bat)ov+=2;if(Math.abs(x.price-c.price)<1000)ov+=4});
-      const score=ov+Math.abs(c.price-target)/span*5-c.quality*0.03;
+      if(chosen.some(x=>Math.abs((x.cov!=null?x.cov:covOf(x.r))-c.cov)<gap))continue;
+      let ov=0;chosen.forEach(x=>{if(x.ib&&x.ib===c.ib)ov+=1.6;if(x.bb&&x.bb===c.bb)ov+=1.6;if(x.pb&&x.pb===c.pb)ov+=0.9;if(x.inv===c.inv)ov+=1;if(x.bat&&x.bat===c.bat)ov+=1});
+      const mods=c.bo?c.bo.n:0;
+      const score=Math.abs(c.cov-tc)/span*10+ov+Math.max(0,mods-3)*0.7+(1-q)*(c.eff-eLo)/eSpan*3-q*c.quality*0.1;
       if(score<bs){bs=score;best=c}
     }
-    if(!best)break;chosen.push(best);out.push(best);
-  }
+    if(best){chosen.push(best);out.push(best)}
+  });
   return out;
 }
-function runInfo(p){const r=pkgRun(p);return {key:pkgKey(r),price:r.contract,pb:bName(r.pv),ib:bName(r.inv),bb:bName(r.bat),inv:r.inv?r.inv.id:"",bat:r.bat?r.bat.id:""}}
+function suggestPackages(n){
+  n=Math.max(1,Math.min(6,n||6));
+  const cat=catalogue(),base=pkgBase();
+  const ref=calcRun({...C,...base,panel:"auto",panelQty:"",inverter:"auto",battery:"auto",batQty:""});
+  if(!ref.monthlyKWh){toast("Enter the client's usage first (Sizing → Usage)");return}
+  if(!cat.pv.length||!cat.inv.length){PKGS=[{label:"Standard",cfg:{...base,panel:"auto",inverter:"auto",battery:"auto",batQty:""},sel:true}];saveCalc();toast("Add panels and inverters with prices in Suppliers to get package suggestions");return}
+  const chosen=pickLadder(allCandidates(ref,cat,base),n);
+  PKGS=chosen.map(c=>({label:"",cfg:c.cfg,sel:true}));sortPkgs();C.act=0;saveCalc();
+  if(chosen.length<n)toast(`Only ${chosen.length} clearly different packages are possible with your Suppliers list. Smaller inverters (3–5 kW) or more battery sizes give more options.`);
+}
+function runInfo(p){const r=pkgRun(p);return {key:pkgKey(r),price:r.contract,kwp:r.kwp,pb:bName(r.pv),ib:bName(r.inv),bb:bName(r.bat),inv:r.inv?r.inv.id:"",bat:r.bat?r.bat.id:""}}
 /* keep packages ordered by selling price, highest first, and name them by rank unless you renamed them */
 function sortPkgs(){
   const cur=PKGS[Math.round(num(C.act))];
@@ -1796,21 +2104,16 @@ function sortPkgs(){
   if(cur){const j=PKGS.indexOf(cur);C.act=j<0?0:j}
   const names=TIER_NAMES[PKGS.length]||[];PKGS.forEach((p,i)=>{if(!p.custom&&(ALL_TIER.has(p.label)||!p.label))p.label=names[i]||"Package "+(i+1)});
 }
-function suggestPackages(n){
-  n=Math.max(1,Math.min(6,n||6));
-  const cands=packageCandidates();
-  if(!cands.length){PKGS=[{label:"Standard",cfg:{...pkgBase(),panel:"auto",inverter:"auto",battery:"auto",batQty:""},sel:true}];saveCalc();toast("Add panels, inverters and batteries with prices in Suppliers to get package suggestions");return}
-  const picks=pickDiverse(cands,n);
-  PKGS=picks.map(c=>({label:"",cfg:c.cfg,sel:true}));sortPkgs();saveCalc();
-  if(picks.length<n)toast(`${picks.length} different packages fit this client with your current supplier items`);
-}
-/* + Add package: your current setup, or the next best different package if that one is already there */
+/* + Add package: your current setup (from Sizing), or the coverage level furthest from the packages you already have */
 function addPackage(){
   if(PKGS.length>=6){toast("Up to 6 packages");return}
-  const cur=calcRun({...C,...pkCfg()}),ck=pkgKey(cur),have=PKGS.map(runInfo);
-  if(!have.some(h=>h.key===ck)&&cur.inv&&cur.pv){PKGS.push({label:"",cfg:pkCfg(),sel:true})}
-  else{const next=pickDiverse(packageCandidates(),1,have)[0];if(!next){toast("No other combination left in your supplier list. Add more items in Suppliers.");return}PKGS.push({label:"",cfg:next.cfg,sel:true})}
-  sortPkgs();saveCalc();
+  const cur=calcRun({...C,...pkCfg()}),ck=pkgKey(cur),have=PKGS.map(p=>{const r=pkgRun(p);return {...runInfo(p),r,cov:covOf(r)}});
+  if(C.view!=="pkg"&&!have.some(h=>h.key===ck)&&cur.inv&&cur.pv){PKGS.push({label:"",cfg:pkCfg(),sel:true});sortPkgs();saveCalc();return}
+  const cat=catalogue(),base=pkgBase(),ref=calcRun({...C,...base,panel:"auto",panelQty:"",inverter:"auto",battery:"auto",batQty:""});
+  if(!ref.monthlyKWh){toast("Enter the client's usage first (Sizing → Usage)");return}
+  const pick=pickLadder(allCandidates(ref,cat,base),1,have)[0];
+  if(!pick){toast("No other clearly different package left in your supplier list. Add more items in Suppliers.");return}
+  PKGS.push({label:"",cfg:pick.cfg,sel:true});sortPkgs();saveCalc();
 }
 function showItems(){
   const r=calcRun();
@@ -1835,6 +2138,14 @@ async function saveCalcToClient(){
 
 
 /* ---------- package details and side-by-side compare ---------- */
+/* plain words you can say to the client */
+function nightText(r){if(!r.batKWh)return "no night backup";const h=Math.round(r.nightHrs);return h>=12?"runs the home all night":`runs the home about ${h} of 12 night hours`}
+function fitText(r){const o=r.offset,h=r.nightHrs||0;
+  return o>=0.9&&h>=11?"Near-zero bill, power all night":o>=0.8?"Most of the bill, most of the night":o>=0.65?"Big cut in the bill, evening backup":o>=0.5?"Half the bill, a few hours backup":"Starter system, daytime savings"}
+function clientText(r){
+  return `${fitText(r)}. Solar covers about ${pct(r.offset)} of the electricity the home uses, so the bill goes from about ${peso(r.bill)} to ${peso(Math.max(0,r.bill-r.savings))} a month. `+
+    (r.batKWh?`The battery stores daytime solar and ${nightText(r)}. `:"There is no battery yet, so savings come from daytime use; a battery can be added later. ")+
+    `The system pays for itself in about ${r.payback>25?"more than 25":r.payback.toFixed(1)} years.`}
 function pkFacts(p,i){
   const r=pkgRun(p),sm=r.saveM.length?r.saveM:[0];
   const lo=Math.min(...sm),hi=Math.max(...sm),yr1=sm.reduce((a,b)=>a+b,0);
@@ -1871,6 +2182,7 @@ function pkDetails(i){
   const nav=PKGS.length>1?`<button type="button" class="btn btn-line btn-sm btn-ic" data-pdgo="${(i-1+PKGS.length)%PKGS.length}" aria-label="Previous package">${UI.left}</button><button type="button" class="btn btn-line btn-sm btn-ic" data-pdgo="${(i+1)%PKGS.length}" aria-label="Next package">${UI.right}</button>`:"";
   const html=`<div class="pdwrap" style="--c:${F.col}">
    <div class="pdhd"><span class="pkno">${i+1}</span><div class="pdt"><h2>${esc(p.label)}</h2><span>${esc(sysText(r))}</span></div><div class="pdp"><span>${r.mobFee?"Total contract price":"Selling price"}</span><b>${peso(r.contract)}</b></div><div class="pdnav">${nav}<button type="button" class="btn btn-sol btn-sm" data-vclose>Done</button></div></div>
+   <p class="pdlead">${esc(clientText(r))}</p>
    <div class="pdgrid">
     <section class="pdsec pd-save"><h3>Savings</h3>
       <div class="pdstats">${stat("Average per month",peso(F.r.savings),"","g")}${stat("Savings range",`${shortPeso(F.lo)} – ${shortPeso(F.hi)}`,`${F.loM} lowest · ${F.hiM} highest`)}${stat("First year",peso(F.yr1))}${stat("Bill per month",`${shortPeso(r.bill)} → ${shortPeso(F.after)}`,`about ${shortPeso(F.afterLo)}–${shortPeso(F.afterHi)} depending on the month`)}</div>
@@ -1879,7 +2191,7 @@ function pkDetails(i){
       <div class="pdstats">${stat("Payback",F.pb,"price ÷ savings, with panel aging","g")}${stat("ROI over 25 years",pct(F.roi),`${shortPeso(F.net25)} more than the price`)}${stat("Yearly return",pct(F.yrRet),"first-year savings ÷ price")}${stat("Savings in 10 / 25 yrs",`${shortPeso(F.c10)} / ${shortPeso(F.c25)}`)}</div>
       <div class="pdcum" aria-label="Savings over time against the price">${cumRows}<p class="pdnote"><u></u> line = contract price ${shortPeso(r.contract)}</p></div></section>
     <section class="pdsec pd-sys"><h3>System</h3>
-      <div class="pdstats">${stat("Solar",r.kwp.toFixed(2)+" kWp",`${r.qty} panels · ${Math.round(r.areaNeed)} m² roof`)}${stat("Inverter",r.inv?r.inv.kw+" kW":"none",r.inv?pct(r.kwp/r.inv.kw)+" PV-to-inverter load":"")}${stat("Battery",r.batKWh?(Math.round(r.batKWh*100)/100)+" kWh":"none",r.batKWh?`${r.batN} pc · covers about ${pct(F.nightCover)} of night use`:"daytime savings only")}${stat("Production",Math.round(r.annual).toLocaleString("en-PH")+" kWh/yr",`${pct(r.offset)} of the bill offset`)}</div></section>
+      <div class="pdstats">${stat("Solar",r.kwp.toFixed(2)+" kWp",`${r.qty} panels · ${Math.round(r.areaNeed)} m² roof`)}${stat("Inverter",r.inv?r.inv.kw+" kW":"none",r.inv?pct(r.kwp/r.inv.kw)+" PV-to-inverter load":"")}${stat("Battery",r.batKWh?(Math.round(r.batKWh*100)/100)+" kWh":"none",r.batKWh?`${r.batN} pc · ${nightText(r)}`:"daytime savings only")}${stat("Production",Math.round(r.annual).toLocaleString("en-PH")+" kWh/yr",`cuts the bill by about ${pct(r.offset)}`)}</div></section>
     <section class="pdsec pd-comp"><h3>Components</h3>${comp||'<p class="pdnote">No priced components yet.</p>'}${accHTML}
       <div class="pdw">Warranty · panels ${wy(r.pv)} · inverter ${wy(r.inv)} · battery ${wy(r.bat)} · workmanship ${C.warranty?"reserve "+C.warranty+"%":"–"}</div></section>
     <section class="pdsec pd-int"><h3>Your cost and profit <em>internal</em></h3>
@@ -1906,8 +2218,9 @@ function pkCompare(){
     ["Inverter",F=>F.r.inv?`${F.r.inv.label}`:"–"],
     ["Battery",F=>F.r.bat?`${F.r.batN} × ${F.r.bat.label}`:"None"],
     ["Warranty",F=>`${wy(F.r.pv)} / ${wy(F.r.inv)} / ${wy(F.r.bat)}`],
-    ["Solar offset",F=>pct(F.r.offset),best(F=>F.r.offset,1)],
-    ["Night covered",F=>F.r.batKWh?pct(F.nightCover):"–",best(F=>F.nightCover,1)],
+    ["Best for",F=>fitText(F.r)],
+    ["Bill reduced by",F=>pct(F.r.offset),best(F=>F.r.offset,1)],
+    ["Night backup",F=>F.r.batKWh?`${Math.round(F.r.nightHrs)} of 12 hrs`:"None",best(F=>F.r.nightHrs,1)],
     ["Savings / month",F=>peso(F.r.savings),best(F=>F.r.savings,1)],
     ["Savings range",F=>`${shortPeso(F.lo)}–${shortPeso(F.hi)}`],
     ["Bill after",F=>shortPeso(F.after)+"/mo",best(F=>-F.after,1)],
@@ -2360,6 +2673,11 @@ document.addEventListener("click",async e=>{
   const cb=T.closest("[data-cb]");if(cb){e.stopPropagation();state.cb=cb.dataset.cb;lsSet("srv2.cb",state.cb);render();return}
   /* clients */
   const pc=T.closest("[data-pick-client]");if(pc){state.sel=+pc.dataset.pickClient;state.detail=true;render();const d=$(".cdetail");if(d)d.scrollTop=0;return}
+  const pp=T.closest("[data-pick-proj]");if(pp){state.psel=+pp.dataset.pickProj;render();const d=$(".pdet");if(d)d.scrollTop=0;return}
+  const pn=T.closest("[data-proj-next]");if(pn){const p=state.data.Projects.find(x=>x._row==pn.dataset.projNext);if(p){const to=pn.dataset.to,rec={...p,Status:to};
+    if(to==="Installing"&&!toISO(p["Start Date"]))rec["Start Date"]=today();if(to==="Completed"&&!toISO(p["Completion Date"]))rec["Completion Date"]=today();
+    if(await saveRecord("Projects",rec,false,p))toast(`${p.Client||"Project"} moved to ${shortStage(to)}`)}return}
+  const pe=T.closest("[data-proj-ev]");if(pe){const p=state.data.Projects.find(x=>x._row==pe.dataset.projEv);const cl=p&&clientFor(p);openForm("Calendar",null,{Client:p?p.Client:"","Client No.":p?p["Client No."]:"",Project:p?p.ID:"",Location:cl?cl.Address||"":"",Date:today()});return}
   const oc=T.closest("[data-client]");if(oc){openClient(+oc.dataset.client);return}
   const cg=T.closest("[data-client-go]");if(cg){const c=state.data.Clients.find(x=>x._row==cg.dataset.row);if(!c)return;
     if(cg.dataset.clientGo==="project")openForm("Projects",null,projectPrefill(c));
@@ -2368,12 +2686,14 @@ document.addEventListener("click",async e=>{
   const of=T.closest("[data-open-file]");if(of&&!T.closest(".sheet,.viewer")){openFile(of.dataset.openFile,of.dataset.kind);return}
   /* navigation and lists */
   const v=T.closest("[data-view]");if(v){if(state.edit)finishEdit();state.view=v.dataset.view;if(state.view==="clients")state.detail=false;lsSet("solarays.view",state.view);render();return}
-  const n=T.closest("[data-new]");if(n){const pre=n.dataset.date?{Date:n.dataset.date}:n.dataset.new==="Suppliers"&&state.supplier?{Supplier:state.supplier}:undefined;openForm(n.dataset.new,null,pre);return}
+  const n=T.closest("[data-new]");if(n){const pre=n.dataset.date?{Date:n.dataset.date}:n.dataset.new==="Suppliers"?{Supplier:state.supplier||"",Active:"Yes"}:undefined;openForm(n.dataset.new,null,pre);return}
   const ed=T.closest("[data-edit]");if(ed){const rec=state.data[ed.dataset.edit].find(r=>r._row==ed.dataset.row);if(rec)openForm(ed.dataset.edit,rec);return}
   const g=T.closest("[data-goto]");if(g&&g.dataset.goto){const i=g.dataset.goto.indexOf(":");const vw=i<0?g.dataset.goto:g.dataset.goto.slice(0,i),fl=i<0?"":g.dataset.goto.slice(i+1);
     state.view=vw;if(fl&&["clients","projects","suppliers"].includes(vw))state.filter[vw]=fl;if(vw==="clients"){state.detail=false;state.sel=null}lsSet("solarays.view",vw);render();return}
   const pv=T.closest("[data-pview]");if(pv){state.pview=pv.dataset.pview;lsSet("solarays.pview",state.pview);render();return}
   const f=T.closest("[data-filter]");if(f){state.filter[f.dataset.filter]=f.dataset.val;render();return}
+  const cgo=T.closest("[data-cal-go],[data-cal-view]");if(cgo&&!T.closest("[data-edit]")){if(cgo.dataset.calView){state.cal.view=cgo.dataset.calView;lsSet("srv2.calview",state.cal.view)}if(cgo.dataset.calGo){state.cal.sel=cgo.dataset.calGo;state.cal.month=cgo.dataset.calGo.slice(0,7)}render();return}
+  const cw=T.closest("[data-cal-nav^='w']");if(cw){const n=+cw.dataset.calNav.slice(1),d=new Date(+state.cal.sel.slice(0,4),+state.cal.sel.slice(5,7)-1,+state.cal.sel.slice(8,10)+7*n);state.cal.sel=isoOf(d);state.cal.month=state.cal.sel.slice(0,7);render();return}
   const cn=T.closest("[data-cal-nav]");if(cn){const d=+cn.dataset.calNav;if(!d){state.cal.sel=today();state.cal.month=today().slice(0,7)}else{const [y,m]=state.cal.month.split("-").map(Number);const nd=new Date(y,m-1+d,1);state.cal.month=`${nd.getFullYear()}-${pad(nd.getMonth()+1)}`;state.cal.sel=state.cal.month+"-01"}render();return}
   const ct=T.closest("[data-cal-type]");if(ct){const ty=ct.dataset.calType,h=state.cal.hidden;state.cal.hidden=h.includes(ty)?h.filter(x=>x!==ty):[...h,ty];lsSet("solarays.calHidden",JSON.stringify(state.cal.hidden));render();return}
   const cd=T.closest("[data-cal-day]");if(cd&&!T.closest("[data-edit]")){state.cal.sel=cd.dataset.calDay;if(cd.dataset.calDay.slice(0,7)!==state.cal.month)state.cal.month=cd.dataset.calDay.slice(0,7);render();return}
@@ -2412,7 +2732,7 @@ $("#settingsBtn").onclick=()=>{if(state.edit)finishEdit();state.view="settings";
 setVH();
 loadCalc();
 {const p=lsGet("solarays.period");if(["30","12","all"].includes(p))state.period=p;if(lsGet("solarays.pview")==="board")state.pview="board";const cbv=lsGet("srv2.cb");state.supplier=lsGet("srv2.supplier")||"";if(["type","town","pay","source"].includes(cbv))state.cb=cbv}
-state.cal.sel=today();state.cal.month=today().slice(0,7);try{const h=JSON.parse(lsGet("solarays.calHidden")||"[]");if(Array.isArray(h))state.cal.hidden=h}catch(e){}
+state.cal.sel=today();state.cal.month=today().slice(0,7);state.cal.view=lsGet("srv2.calview")||"month";try{const h=JSON.parse(lsGet("solarays.calHidden")||"[]");if(Array.isArray(h))state.cal.hidden=h}catch(e){}
 const sv=lsGet("solarays.view");if(sv&&VIEWS.some(x=>x[0]===sv))state.view=sv;
 if(location.hash&&VIEWS.some(x=>x[0]===location.hash.slice(1)))state.view=location.hash.slice(1);
 lastGrid=innerWidth+"x"+innerHeight;

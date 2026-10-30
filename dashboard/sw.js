@@ -1,10 +1,10 @@
 /* SolaRays Dashboard v2 · service worker
    Keeps the app's own files on the device so it opens instantly, even on weak signal.
    Your Google Sheet data is never stored here: it always goes straight to the Apps Script. */
-const VERSION = "7ec5072a8a";
+const VERSION = "756cbb1718";
 const CACHE = "srv2-" + VERSION;
 const FONTS = "srv2-fonts";
-const SHELL = ["./", "index.html", "manifest.webmanifest", "vendor/bootstrap.min.css?v=399b491526", "css/app.css?v=c24a22270a", "js/app.js?v=75af89f0fb", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
+const SHELL = ["./", "index.html", "manifest.webmanifest", "vendor/bootstrap.min.css?v=399b491526", "css/app.css?v=827c85c5b7", "js/app.js?v=d06856837b", "icons/icon-192.png", "icons/icon-512.png", "icons/apple-touch-icon.png"];
 
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)));
